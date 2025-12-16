@@ -1,1 +1,68 @@
+= ddraig-ssg
+:toc: auto
+:toclevels: 3
 
+**The definitive Idris 2 static site generator.**
+
+== Overview
+
+ddraig-ssg (Welsh for "dragon") is a dependently-typed static site generator
+written in Idris 2. It uses dependent types to provide compile-time correctness
+guarantees that are impossible in other languages.
+
+== Language Enforcement
+
+[IMPORTANT]
+====
+This SSG **MUST** be written in Idris 2. No exceptions.
+
+Forbidden languages for SSG logic:
+
+* Python
+* JavaScript/TypeScript
+* Haskell (even though related)
+* Any language other than Idris 2
+
+The **ONLY** non-Idris code allowed is the ReScript MCP adapter in `adapters/`.
+====
+
+== Features
+
+* Dependent types for provably correct site generation
+* Totality checking ensures all code paths are handled
+* Compile-time validation of content structure
+* First-class support for typed templates
+* Interactive theorem proving for complex constraints
+
+== Requirements
+
+* Idris 2
+
+== Building
+
+[source,bash]
+----
+idris2 --build ddraig.ipkg
+./build/exec/ddraig-ssg build
+----
+
+== Project Structure
+
+[source]
+----
+ddraig-ssg/
+├── src/                  # Idris 2 source (THE SSG)
+├── adapters/             # ReScript MCP adapter only
+├── STATE.scm             # Project state
+├── ECOSYSTEM.scm         # Ecosystem position
+├── META.scm              # Architecture decisions
+└── .claude/CLAUDE.md     # AI guidelines
+----
+
+== Part of poly-ssg
+
+ddraig-ssg is a satellite of the https://github.com/hyperpolymath/poly-ssg-mcp[poly-ssg-mcp] hub.
+
+== License
+
+AGPL-3.0-or-later
