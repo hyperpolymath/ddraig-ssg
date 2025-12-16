@@ -1,0 +1,17 @@
+{
+  "name": "ddraig-ssg-adapter",
+  "version": "0.1.0",
+  "description": "ReScript MCP adapter for ddraig-ssg",
+  "type": "module",
+  "main": "src/DdraigAdapter.mjs",
+  "scripts": {
+    "build": "rescript",
+    "clean": "rescript clean",
+    "watch": "rescript -w"
+  },
+  "devDependencies": {
+    "rescript": "^11.1.0"
+  },
+  "license": "AGPL-3.0-or-later",
+  "author": "Jonathan D.A. Jewell"
+}
