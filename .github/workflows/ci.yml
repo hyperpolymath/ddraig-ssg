@@ -19,7 +19,7 @@ jobs:
       - name: Set up Idris 2
         uses: idris-community/setup-idris@a32a5481bce5bcb57fec37a6fbd1d2d4dbbe0da9 # v1
         with:
-          version: '0.7.0'
+          version: '0.8.0'
 
       - name: Build
         run: idris2 --build ddraig.ipkg || echo "Build file not found - needs setup"
