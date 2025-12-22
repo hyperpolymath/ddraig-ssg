@@ -55,12 +55,12 @@ jobs:
     needs: language-check
 
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
 
       - name: Set up Idris 2
         uses: idris-community/setup-idris@a32a5481bce5bcb57fec37a6fbd1d2d4dbbe0da9 # v1
         with:
-          version: ${{ env.IDRIS_VERSION }}
+          version: '0.8.0'
 
       - name: Cache Idris build
         uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4
@@ -95,7 +95,7 @@ jobs:
     needs: build
 
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
 
       - name: Set up Idris 2
         uses: idris-community/setup-idris@a32a5481bce5bcb57fec37a6fbd1d2d4dbbe0da9 # v1
