@@ -1,12 +1,25 @@
-;;; STATE.scm — ddraig-ssg
+;;; STATE.scm — ddraig-ssg Project State
 ;; SPDX-License-Identifier: AGPL-3.0-or-later
 ;; SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+
+(define-module (ddraig-ssg state)
+  #:export (metadata language-enforcement current-position
+            blockers-and-issues critical-next-actions
+            security-status component-status state-summary))
+
+;; ============================================================================
+;; Metadata
+;; ============================================================================
 
 (define metadata
   '((version . "1.0.0")
     (updated . "2025-12-17")
     (project . "ddraig-ssg")
     (required-language . "Idris")))
+
+;; ============================================================================
+;; Language Enforcement
+;; ============================================================================
 
 (define language-enforcement
   '((primary-language . "Idris")
@@ -16,6 +29,10 @@
     (forbidden-languages . ("Python" "JavaScript" "TypeScript" "Ruby" "Go"))
     (rationale . "ddraig-ssg is the DEFINITIVE Idris static site generator. It MUST be written entirely in Idris. No other implementation languages are permitted.")
     (enforcement . "strict")))
+
+;; ============================================================================
+;; Current Position
+;; ============================================================================
 
 (define current-position
   '((phase . "v1.0 - Idris Implementation Complete, Hub Integration In Progress")

@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2025 hyperpolymath
 name: Idris 2 CI
 
 permissions: read-all
@@ -9,9 +10,49 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  IDRIS_VERSION: '0.8.0'
+
 jobs:
-  build:
+  # Language compliance check - runs first and fast
+  language-check:
+    name: Language Compliance
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Verify Idris-only in src/
+        run: |
+          echo "🐉 ddraig-ssg Language Compliance Check"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Checking for forbidden languages in src/..."
+          forbidden=$(find src/ -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.hs" -o -name "*.rb" -o -name "*.go" -o -name "*.java" \) 2>/dev/null || true)
+          if [ -n "$forbidden" ]; then
+            echo "❌ ERROR: Found forbidden language files in src/:"
+            echo "$forbidden"
+            echo ""
+            echo "ddraig-ssg is THE Idris SSG. No other languages permitted in src/."
+            exit 1
+          fi
+          echo "✅ OK: Only Idris files in src/"
+
+      - name: Verify ReScript-only in adapters/
+        run: |
+          echo "Checking adapters/ directory..."
+          if [ -d "adapters/src" ]; then
+            forbidden=$(find adapters/src/ -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.idr" \) 2>/dev/null || true)
+            if [ -n "$forbidden" ]; then
+              echo "⚠️ WARNING: Non-ReScript files in adapters/src/:"
+              echo "$forbidden"
+            fi
+          fi
+          echo "✅ OK: Adapter language check complete"
+
+  # Main build job
+  build:
+    name: Build & Type Check
+    runs-on: ubuntu-latest
+    needs: language-check
 
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
@@ -21,27 +62,140 @@ jobs:
         with:
           version: '0.8.0'
 
-      - name: Build
-        run: idris2 --build ddraig.ipkg || echo "Build file not found - needs setup"
+      - name: Cache Idris build
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4
+        with:
+          path: |
+            src/build/ttc
+            ~/.idris2
+          key: idris-${{ runner.os }}-${{ env.IDRIS_VERSION }}-${{ hashFiles('src/**/*.idr') }}
+          restore-keys: |
+            idris-${{ runner.os }}-${{ env.IDRIS_VERSION }}-
 
       - name: Type Check
         run: |
-          if [ -f src/Main.idr ]; then
-            idris2 --typecheck src/Main.idr
-          fi
+          echo "🔍 Type checking Ddraig.idr..."
+          cd src && idris2 --typecheck Ddraig.idr
+          echo "✅ Type check passed"
 
-  language-check:
+      - name: Build
+        run: |
+          echo "🔨 Building ddraig-ssg..."
+          if [ -f "ddraig.ipkg" ]; then
+            idris2 --build ddraig.ipkg
+          else
+            cd src && idris2 Ddraig.idr -o ddraig
+          fi
+          echo "✅ Build complete"
+
+  # Test job
+  test:
+    name: Run Tests
     runs-on: ubuntu-latest
+    needs: build
+
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v4
 
-      - name: Verify Idris-only in src/
+      - name: Set up Idris 2
+        uses: idris-community/setup-idris@a32a5481bce5bcb57fec37a6fbd1d2d4dbbe0da9 # v1
+        with:
+          version: ${{ env.IDRIS_VERSION }}
+
+      - name: Cache Idris build
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4
+        with:
+          path: |
+            src/build/ttc
+            ~/.idris2
+          key: idris-${{ runner.os }}-${{ env.IDRIS_VERSION }}-${{ hashFiles('src/**/*.idr') }}
+          restore-keys: |
+            idris-${{ runner.os }}-${{ env.IDRIS_VERSION }}-
+
+      - name: Build for Testing
         run: |
-          echo "Checking for forbidden languages in src/..."
-          forbidden=$(find src/ -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.hs" \) 2>/dev/null || true)
-          if [ -n "$forbidden" ]; then
-            echo "ERROR: Found forbidden language files in src/:"
-            echo "$forbidden"
-            exit 1
+          cd src && idris2 Ddraig.idr -o ddraig
+
+      - name: Run Markdown Tests
+        run: |
+          echo "🧪 Testing Markdown parser..."
+          ./src/build/exec/ddraig test-markdown
+
+      - name: Run Frontmatter Tests
+        run: |
+          echo "🧪 Testing Frontmatter parser..."
+          ./src/build/exec/ddraig test-frontmatter
+
+      - name: Run Full Pipeline Tests
+        run: |
+          echo "🧪 Testing full pipeline..."
+          ./src/build/exec/ddraig test-full
+
+  # Adapter build job
+  adapter:
+    name: Build Adapter
+    runs-on: ubuntu-latest
+    needs: language-check
+
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: adapters/package-lock.json
+
+      - name: Install dependencies
+        working-directory: adapters
+        run: npm ci || npm install
+
+      - name: Build ReScript adapter
+        working-directory: adapters
+        run: npm run build
+
+      - name: Verify build output
+        working-directory: adapters
+        run: |
+          if [ -f "src/DdraigAdapter.mjs" ]; then
+            echo "✅ Adapter build successful"
+          else
+            echo "⚠️ Adapter build output not found (may need ReScript setup)"
           fi
-          echo "OK: Only Idris files in src/"
+
+  # Security checks
+  security:
+    name: Security Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Check SHA-pinned actions
+        run: |
+          echo "🔒 Checking GitHub Actions are SHA-pinned..."
+          unpinned=$(grep -r "uses:" .github/workflows/*.yml | grep -v "@[a-f0-9]\{40\}" | grep -v "^#" || true)
+          if [ -n "$unpinned" ]; then
+            echo "⚠️ Found actions without SHA pins:"
+            echo "$unpinned"
+          else
+            echo "✅ All actions are SHA-pinned"
+          fi
+
+      - name: Check for secrets in code
+        run: |
+          echo "🔒 Checking for potential secrets..."
+          secrets=$(grep -rn "BEGIN.*PRIVATE\|password\s*=.*['\"]" --include="*.idr" --include="*.res" src/ adapters/src/ 2>/dev/null || true)
+          if [ -n "$secrets" ]; then
+            echo "⚠️ Potential secrets found - review manually:"
+            echo "$secrets"
+          else
+            echo "✅ No obvious secrets detected"
+          fi
+
+      - name: Audit npm dependencies
+        working-directory: adapters
+        run: |
+          echo "🔒 Running npm audit..."
+          npm audit --audit-level=high || echo "⚠️ npm audit found issues (or npm install needed)"

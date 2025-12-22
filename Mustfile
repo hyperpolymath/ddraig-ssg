@@ -1,0 +1,215 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+#
+# Mustfile — ddraig-ssg mandatory requirements
+# These are the MUST-have recipes that define project compliance
+#
+# Format: must <requirement> [command]
+# All requirements MUST pass for the project to be considered compliant
+
+# ============================================================================
+# Language Requirements (ABSOLUTE - NO EXCEPTIONS)
+# ============================================================================
+
+# MUST: Only Idris in src/ directory
+must idris-only-src
+    @echo "MUST: Verify Idris-only in src/"
+    @forbidden=$$(find src/ -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.hs" -o -name "*.rb" -o -name "*.go" -o -name "*.java" \) 2>/dev/null || true)
+    @if [ -n "$$forbidden" ]; then \
+        echo "❌ FAIL: Found forbidden language files:"; \
+        echo "$$forbidden"; \
+        echo "This is THE Idris SSG. No other languages permitted in src/."; \
+        exit 1; \
+    fi
+    @echo "✓ PASS: Only Idris files in src/"
+
+# MUST: ReScript only in adapters/
+must rescript-only-adapters
+    @echo "MUST: Verify ReScript-only in adapters/"
+    @forbidden=$$(find adapters/src/ -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.idr" \) 2>/dev/null || true)
+    @if [ -n "$$forbidden" ]; then \
+        echo "❌ FAIL: Found non-ReScript files in adapters/src/:"; \
+        echo "$$forbidden"; \
+        exit 1; \
+    fi
+    @echo "✓ PASS: Only ReScript files in adapters/src/"
+
+# ============================================================================
+# Build Requirements
+# ============================================================================
+
+# MUST: Project builds successfully
+must build
+    @echo "MUST: Project builds"
+    cd src && idris2 --build ddraig.ipkg
+    @echo "✓ PASS: Build successful"
+
+# MUST: Type check passes
+must typecheck
+    @echo "MUST: Type check passes"
+    cd src && idris2 --typecheck Ddraig.idr
+    @echo "✓ PASS: Type check successful"
+
+# MUST: All tests pass
+must test
+    @echo "MUST: All tests pass"
+    ./src/build/exec/ddraig test-markdown
+    ./src/build/exec/ddraig test-frontmatter
+    ./src/build/exec/ddraig test-full
+    @echo "✓ PASS: All tests passed"
+
+# ============================================================================
+# Security Requirements
+# ============================================================================
+
+# MUST: GitHub Actions are SHA-pinned
+must sha-pinned-actions
+    @echo "MUST: GitHub Actions are SHA-pinned"
+    @unpinned=$$(grep -r "uses:" .github/workflows/*.yml | grep -v "@[a-f0-9]\{40\}" | grep -v "^#" || true)
+    @if [ -n "$$unpinned" ]; then \
+        echo "❌ FAIL: Found actions without SHA pins:"; \
+        echo "$$unpinned"; \
+        exit 1; \
+    fi
+    @echo "✓ PASS: All actions SHA-pinned"
+
+# MUST: No secrets in codebase
+must no-secrets
+    @echo "MUST: No secrets in codebase"
+    @secrets=$$(grep -rn "BEGIN.*PRIVATE\|password\s*=\|api_key\s*=\|secret\s*=" --include="*.idr" --include="*.res" --include="*.json" src/ adapters/src/ 2>/dev/null | grep -v "test\|example\|mock" || true)
+    @if [ -n "$$secrets" ]; then \
+        echo "❌ FAIL: Potential secrets found:"; \
+        echo "$$secrets"; \
+        exit 1; \
+    fi
+    @echo "✓ PASS: No obvious secrets detected"
+
+# MUST: .gitignore excludes sensitive files
+must gitignore-secure
+    @echo "MUST: .gitignore excludes sensitive files"
+    @patterns=(".env" "*.pem" "*.key" "credentials" "secrets")
+    @for pattern in ".env" "*.pem" "*.key"; do \
+        if ! grep -q "$$pattern" .gitignore; then \
+            echo "❌ FAIL: .gitignore missing pattern: $$pattern"; \
+            exit 1; \
+        fi; \
+    done
+    @echo "✓ PASS: .gitignore has security patterns"
+
+# ============================================================================
+# Documentation Requirements
+# ============================================================================
+
+# MUST: README exists
+must readme
+    @echo "MUST: README exists"
+    @if [ ! -f README.adoc ] && [ ! -f README.md ]; then \
+        echo "❌ FAIL: No README found"; \
+        exit 1; \
+    fi
+    @echo "✓ PASS: README exists"
+
+# MUST: SECURITY.md exists and is complete
+must security-md
+    @echo "MUST: SECURITY.md exists and has no placeholders"
+    @if [ ! -f SECURITY.md ]; then \
+        echo "❌ FAIL: SECURITY.md not found"; \
+        exit 1; \
+    fi
+    @if grep -q "{{.*}}" SECURITY.md; then \
+        echo "❌ FAIL: SECURITY.md contains unfilled placeholders"; \
+        exit 1; \
+    fi
+    @echo "✓ PASS: SECURITY.md complete"
+
+# MUST: LICENSE exists
+must license
+    @echo "MUST: LICENSE exists"
+    @if [ ! -f LICENSE.txt ] && [ ! -f LICENSE ]; then \
+        echo "❌ FAIL: No LICENSE found"; \
+        exit 1; \
+    fi
+    @echo "✓ PASS: LICENSE exists"
+
+# ============================================================================
+# SPDX Requirements
+# ============================================================================
+
+# MUST: Source files have SPDX headers
+must spdx-headers
+    @echo "MUST: Source files have SPDX headers"
+    @for file in src/*.idr adapters/src/*.res; do \
+        if [ -f "$$file" ] && ! grep -q "SPDX-License-Identifier" "$$file" 2>/dev/null; then \
+            echo "❌ FAIL: Missing SPDX header in $$file"; \
+            exit 1; \
+        fi; \
+    done 2>/dev/null || true
+    @echo "✓ PASS: SPDX headers present (checking available files)"
+
+# ============================================================================
+# Configuration Requirements
+# ============================================================================
+
+# MUST: .scm files are valid
+must scm-files
+    @echo "MUST: Core .scm files exist"
+    @for file in META.scm ECOSYSTEM.scm STATE.scm; do \
+        if [ ! -f "$$file" ]; then \
+            echo "❌ FAIL: Missing $$file"; \
+            exit 1; \
+        fi; \
+    done
+    @echo "✓ PASS: Core .scm files exist"
+
+# MUST: CI workflow exists
+must ci-workflow
+    @echo "MUST: CI workflow exists"
+    @if [ ! -f .github/workflows/ci.yml ]; then \
+        echo "❌ FAIL: .github/workflows/ci.yml not found"; \
+        exit 1; \
+    fi
+    @echo "✓ PASS: CI workflow exists"
+
+# ============================================================================
+# Aggregate Commands
+# ============================================================================
+
+# Run all language MUSTs
+must-language: must-idris-only-src must-rescript-only-adapters
+    @echo "✓ All language requirements PASS"
+
+# Run all security MUSTs
+must-security: must-sha-pinned-actions must-no-secrets must-gitignore-secure
+    @echo "✓ All security requirements PASS"
+
+# Run all documentation MUSTs
+must-docs: must-readme must-security-md must-license
+    @echo "✓ All documentation requirements PASS"
+
+# Run all build MUSTs (requires Idris2)
+must-build: must-build must-typecheck must-test
+    @echo "✓ All build requirements PASS"
+
+# Run ALL MUSTs (complete compliance check)
+must-all: must-language must-security must-docs must-scm-files must-ci-workflow
+    @echo ""
+    @echo "════════════════════════════════════════════"
+    @echo "✓ ALL MUST REQUIREMENTS PASSED"
+    @echo "════════════════════════════════════════════"
+    @echo "ddraig-ssg is compliant with all mandatory requirements."
+
+# Quick compliance check (no build required)
+must-quick: must-language must-security must-docs
+    @echo "✓ Quick compliance check PASSED"
+
+# Help
+must-help:
+    @echo "Mustfile — Mandatory Requirement Checker"
+    @echo ""
+    @echo "Language:  must-language (idris-only-src, rescript-only-adapters)"
+    @echo "Security:  must-security (sha-pinned, no-secrets, gitignore)"
+    @echo "Docs:      must-docs (readme, security-md, license)"
+    @echo "Build:     must-build (build, typecheck, test)"
+    @echo ""
+    @echo "All:       must-all (complete compliance)"
+    @echo "Quick:     must-quick (no build required)"

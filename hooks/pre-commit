@@ -1,0 +1,56 @@
+#!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2025 hyperpolymath
+#
+# pre-commit hook for ddraig-ssg
+# Enforces language policy and basic quality checks
+
+set -e
+
+echo "🐉 ddraig-ssg pre-commit checks"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Check 1: No forbidden languages in src/
+echo "Checking language compliance..."
+forbidden=$(find src/ -type f \( \
+    -name "*.py" -o \
+    -name "*.js" -o \
+    -name "*.ts" -o \
+    -name "*.hs" -o \
+    -name "*.rb" -o \
+    -name "*.go" -o \
+    -name "*.java" \
+\) 2>/dev/null || true)
+
+if [ -n "$forbidden" ]; then
+    echo "❌ ERROR: Found forbidden language files in src/:"
+    echo "$forbidden"
+    echo ""
+    echo "ddraig-ssg is THE Idris SSG. No other languages permitted in src/."
+    exit 1
+fi
+echo "✅ Language check passed"
+
+# Check 2: Type check (if idris2 is available)
+if command -v idris2 &> /dev/null; then
+    echo "Running type check..."
+    if [ -f "src/Ddraig.idr" ]; then
+        cd src && idris2 --typecheck Ddraig.idr
+        cd ..
+        echo "✅ Type check passed"
+    fi
+else
+    echo "⚠️ idris2 not found - skipping type check"
+fi
+
+# Check 3: No obvious secrets
+echo "Checking for secrets..."
+secrets=$(grep -rn "BEGIN.*PRIVATE\|password\s*=.*['\"]" --include="*.idr" --include="*.res" src/ adapters/src/ 2>/dev/null || true)
+if [ -n "$secrets" ]; then
+    echo "⚠️ WARNING: Potential secrets found - review before committing:"
+    echo "$secrets"
+    # Don't fail, just warn
+fi
+
+echo ""
+echo "✅ All pre-commit checks passed"

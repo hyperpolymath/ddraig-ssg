@@ -1,0 +1,654 @@
+= ddraig-ssg Cookbook
+:toc: left
+:toclevels: 3
+:icons: font
+:source-highlighter: rouge
+:sectanchors:
+:sectlinks:
+
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2025 Jonathan D.A. Jewell
+
+== Overview
+
+This cookbook provides comprehensive recipes for building, testing, deploying, and maintaining ddraig-ssg — the DEFINITIVE Idris static site generator.
+
+[IMPORTANT]
+====
+ddraig-ssg is written entirely in *Idris 2*. This is non-negotiable.
+The only exception is the MCP adapter in `adapters/` which uses ReScript.
+====
+
+'''
+
+[[cli]]
+== CLI Recipes
+
+Command-line recipes for common operations.
+
+[[cli-build]]
+=== Building
+
+[source,bash]
+----
+# Standard build
+cd src && idris2 --build ddraig.ipkg
+
+# Type check only (faster feedback)
+idris2 --typecheck src/Ddraig.idr
+
+# Clean and rebuild
+rm -rf src/build/ && cd src && idris2 --build ddraig.ipkg
+
+# Build MCP adapter
+cd adapters && npm install && npm run build
+----
+
+[[cli-test]]
+=== Testing
+
+[source,bash]
+----
+# Run all tests
+./src/build/exec/ddraig test-markdown
+./src/build/exec/ddraig test-frontmatter
+./src/build/exec/ddraig test-full
+
+# Quick type verification
+idris2 --typecheck src/Ddraig.idr
+
+# E2E test with sample content
+echo '---
+title: Test Post
+date: 2025-01-01
+---
+
+# Hello World
+
+This is a **test** with `code`.' > test.md
+./src/build/exec/ddraig test-full
+rm test.md
+----
+
+[[cli-lint]]
+=== Linting & Compliance
+
+[source,bash]
+----
+# Check for forbidden languages in src/
+find src/ -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.hs" \) 2>/dev/null
+
+# Verify SHA-pinned actions
+grep -r "uses:" .github/workflows/*.yml | grep -v "@[a-f0-9]\{40\}"
+
+# Check for secrets
+grep -rn "password\|secret\|api_key" --include="*.idr" --include="*.res" src/ adapters/src/
+
+# npm audit (adapters)
+cd adapters && npm audit
+----
+
+[[cli-security]]
+=== Security Audit
+
+[source,bash]
+----
+# Full security check
+echo "=== SHA-pinned Actions ===" && \
+grep -r "uses:" .github/workflows/*.yml | grep -v "@[a-f0-9]\{40\}" || echo "All pinned" && \
+echo "=== Secrets Check ===" && \
+grep -rn "BEGIN.*PRIVATE\|password\s*=" src/ adapters/src/ || echo "None found" && \
+echo "=== NPM Audit ===" && \
+cd adapters && npm audit 2>/dev/null || echo "Run npm install first"
+----
+
+[[cli-lsp]]
+=== Language Server
+
+[source,bash]
+----
+# Start Idris 2 LSP
+idris2-lsp
+
+# With logging
+idris2-lsp --log-level DEBUG
+----
+
+[[cli-combinatorics]]
+=== CLI Combinatorics
+
+Common command combinations and pipelines.
+
+[source,bash]
+----
+# Build + Test
+cd src && idris2 --build ddraig.ipkg && cd .. && ./src/build/exec/ddraig test-full
+
+# Clean + Build + Test
+rm -rf src/build/ && cd src && idris2 --build ddraig.ipkg && cd .. && \
+./src/build/exec/ddraig test-markdown && \
+./src/build/exec/ddraig test-frontmatter && \
+./src/build/exec/ddraig test-full
+
+# Full CI locally
+cd src && idris2 --build ddraig.ipkg && cd .. && \
+idris2 --typecheck src/Ddraig.idr && \
+find src/ -type f \( -name "*.py" -o -name "*.js" \) | wc -l | grep -q "^0$" && \
+./src/build/exec/ddraig test-full && \
+echo "✓ CI passed locally"
+
+# Parallel adapter build
+(cd src && idris2 --build ddraig.ipkg) & \
+(cd adapters && npm install && npm run build) & \
+wait && echo "Both builds complete"
+----
+
+'''
+
+[[just]]
+== Just Recipes
+
+Using the `justfile` for automation.
+
+[[just-build]]
+=== Build Commands
+
+[source,bash]
+----
+# Build Idris engine
+just build
+
+# Build MCP adapter
+just build-adapter
+
+# Build everything
+just build-all
+
+# Clean
+just clean
+
+# Rebuild from scratch
+just rebuild
+----
+
+[[just-test]]
+=== Test Commands
+
+[source,bash]
+----
+# All tests
+just test
+
+# Specific test suites
+just test-markdown
+just test-frontmatter
+just test-full
+
+# E2E tests
+just test-e2e
+
+# Complete test suite
+just test-all
+----
+
+[[just-lint]]
+=== Linting & Type Checking
+
+[source,bash]
+----
+# Type check
+just typecheck
+
+# Language compliance
+just lint-language
+
+# All lints
+just lint
+
+# Pre-commit checks
+just pre-commit
+----
+
+[[just-ci]]
+=== CI/CD
+
+[source,bash]
+----
+# Full CI pipeline
+just ci
+
+# CI build only
+just ci-build
+
+# CI test only
+just ci-test
+
+# Security audit
+just security-audit
+----
+
+[[just-dev]]
+=== Development
+
+[source,bash]
+----
+# Start LSP
+just lsp
+
+# Watch mode (requires watchexec)
+just watch
+
+# Project info
+just info
+
+# Version
+just version
+----
+
+[[just-combinatorics]]
+=== Just Combinatorics
+
+Combining just recipes.
+
+[source,bash]
+----
+# Full development workflow
+just clean && just build && just test && just lint
+
+# Pre-release check
+just rebuild && just test-all && just security-audit
+
+# Quick sanity check
+just typecheck && just lint-language
+
+# Container workflow
+just container-build && just container-run
+----
+
+'''
+
+[[must]]
+== Must Recipes
+
+Mandatory compliance checks using the `Mustfile`.
+
+[[must-language]]
+=== Language Requirements
+
+[source,bash]
+----
+# Verify Idris-only in src/
+must idris-only-src
+
+# Verify ReScript-only in adapters/
+must rescript-only-adapters
+
+# All language checks
+must-language
+----
+
+[[must-security]]
+=== Security Requirements
+
+[source,bash]
+----
+# SHA-pinned actions
+must sha-pinned-actions
+
+# No secrets in code
+must no-secrets
+
+# .gitignore security
+must gitignore-secure
+
+# All security checks
+must-security
+----
+
+[[must-docs]]
+=== Documentation Requirements
+
+[source,bash]
+----
+# README exists
+must readme
+
+# SECURITY.md complete
+must security-md
+
+# LICENSE exists
+must license
+
+# All doc checks
+must-docs
+----
+
+[[must-all]]
+=== Full Compliance
+
+[source,bash]
+----
+# Quick check (no build)
+must-quick
+
+# Full compliance (all MUSTs)
+must-all
+----
+
+'''
+
+[[nickel]]
+== Nickel Configuration
+
+Type-safe configuration using Nickel.
+
+[[nickel-validate]]
+=== Validation
+
+[source,bash]
+----
+# Validate project config
+nickel export nickel/config.ncl
+
+# Check schema
+nickel typecheck nickel/schema.ncl
+
+# Validate CI config
+nickel export nickel/ci.ncl | jq .ci_workflow
+----
+
+[[nickel-generate]]
+=== Generate Configurations
+
+[source,bash]
+----
+# Generate site config
+nickel export nickel/schema.ncl -f json --field defaults.site > site-config.json
+
+# Generate CI workflow
+nickel export nickel/ci.ncl -f yaml --field ci_workflow > .github/workflows/ci-generated.yml
+----
+
+[[nickel-schemas]]
+=== Schema Reference
+
+.Frontmatter Schema
+[source,nickel]
+----
+{
+  title | String,
+  date | String | optional,
+  tags | Array String | default = [],
+  draft | Bool | default = false,
+  template | String | default = "default",
+}
+----
+
+.Site Config Schema
+[source,nickel]
+----
+{
+  title | String,
+  base_url | String,
+  language | String | default = "en",
+  build = {
+    output_dir | String | default = "output",
+    content_dir | String | default = "content",
+  },
+}
+----
+
+'''
+
+[[hooks]]
+== Hooks Configuration
+
+Git hooks and Claude Code hooks.
+
+[[hooks-git]]
+=== Git Hooks
+
+.pre-commit hook
+[source,bash]
+----
+#!/bin/bash
+# .git/hooks/pre-commit
+
+# Check for forbidden languages
+forbidden=$(find src/ -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" \) 2>/dev/null)
+if [ -n "$forbidden" ]; then
+    echo "ERROR: Forbidden language files in src/"
+    echo "$forbidden"
+    exit 1
+fi
+
+# Type check
+idris2 --typecheck src/Ddraig.idr || exit 1
+
+echo "Pre-commit checks passed"
+----
+
+.pre-push hook
+[source,bash]
+----
+#!/bin/bash
+# .git/hooks/pre-push
+
+# Run tests
+./src/build/exec/ddraig test-full || {
+    echo "Tests failed - push aborted"
+    exit 1
+}
+
+echo "Pre-push checks passed"
+----
+
+[[hooks-claude]]
+=== Claude Code Hooks
+
+.Session start hook
+[source,json]
+----
+{
+  "hooks": {
+    "session-start": [
+      "echo '🐉 ddraig-ssg - Idris SSG'",
+      "echo 'Language: Idris 2 ONLY in src/'",
+      "just info 2>/dev/null || echo 'Install just for automation'"
+    ]
+  }
+}
+----
+
+.Pre-tool hooks
+[source,json]
+----
+{
+  "hooks": {
+    "pre-tool": {
+      "Write": "echo 'Writing to file - verify Idris compliance'"
+    }
+  }
+}
+----
+
+'''
+
+[[cicd]]
+== CI/CD Pipeline
+
+GitHub Actions workflow configuration.
+
+[[cicd-main]]
+=== Main CI Workflow
+
+.Full CI workflow
+[source,yaml]
+----
+name: Idris 2 CI
+
+permissions: read-all
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+
+      - name: Set up Idris 2
+        uses: idris-community/setup-idris@a32a5481bce5bcb57fec37a6fbd1d2d4dbbe0da9
+        with:
+          version: '0.8.0'
+
+      - name: Build
+        run: idris2 --build ddraig.ipkg
+
+      - name: Type Check
+        run: idris2 --typecheck src/Ddraig.idr
+
+      - name: Run Tests
+        run: |
+          ./build/exec/ddraig test-markdown
+          ./build/exec/ddraig test-frontmatter
+          ./build/exec/ddraig test-full
+
+  language-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+
+      - name: Verify Idris-only in src/
+        run: |
+          forbidden=$(find src/ -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.hs" \) 2>/dev/null || true)
+          if [ -n "$forbidden" ]; then
+            echo "ERROR: Found forbidden language files"
+            exit 1
+          fi
+----
+
+[[cicd-security]]
+=== Security Scanning
+
+.CodeQL workflow
+[source,yaml]
+----
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '42 20 * * 0'
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@ea9e4e37992a54ee68a9571571f9a567d8f90f78
+        with:
+          languages: javascript-typescript
+
+      - name: Perform Analysis
+        uses: github/codeql-action/analyze@ea9e4e37992a54ee68a9571571f9a567d8f90f78
+----
+
+'''
+
+[[troubleshooting]]
+== Troubleshooting
+
+Common issues and solutions.
+
+[[troubleshooting-build]]
+=== Build Issues
+
+[cols="1,2,2"]
+|===
+|Issue |Cause |Solution
+
+|`idris2: command not found`
+|Idris 2 not installed
+|Install via Pack: `pack install idris2`
+
+|`Module not found`
+|Missing dependency
+|Check imports in .idr files
+
+|`Type mismatch`
+|Type error in code
+|Review type signatures and implementations
+|===
+
+[[troubleshooting-test]]
+=== Test Issues
+
+[cols="1,2,2"]
+|===
+|Issue |Cause |Solution
+
+|`No such file: build/exec/ddraig`
+|Build not run
+|Run: `just build`
+
+|`Permission denied`
+|Executable bit not set
+|Run: `chmod +x src/build/exec/ddraig`
+
+|Test output unexpected
+|Parser bug or test data issue
+|Review test input and expected output
+|===
+
+'''
+
+[[appendix]]
+== Appendix
+
+[[appendix-files]]
+=== Key Files
+
+[cols="1,2"]
+|===
+|File |Purpose
+
+|`src/Ddraig.idr`
+|Main Idris SSG engine
+
+|`adapters/src/DdraigAdapter.res`
+|ReScript MCP adapter
+
+|`justfile`
+|Build automation recipes
+
+|`Mustfile`
+|Mandatory compliance checks
+
+|`nickel/*.ncl`
+|Type-safe configurations
+
+|`*.scm`
+|Project metadata and state
+|===
+
+[[appendix-language]]
+=== Language Policy
+
+[IMPORTANT]
+====
+* `src/` — *Idris 2 ONLY*
+* `adapters/` — ReScript only
+* Everything else — Python, JS, TS, Ruby, Go, Haskell are *FORBIDDEN*
+====
+
+This is THE Idris SSG. No exceptions.
