@@ -1,0 +1,27 @@
+{
+  "$schema": "https://claude.ai/schemas/claude-code-settings.json",
+  "hooks": {
+    "session-start": [
+      ".claude/hooks/session-start.sh"
+    ],
+    "pre-tool": {
+      "Write": {
+        "match": "src/**/*.py|src/**/*.js|src/**/*.ts",
+        "action": "block",
+        "message": "FORBIDDEN: Only Idris files allowed in src/. This is THE Idris SSG."
+      }
+    }
+  },
+  "project": {
+    "name": "ddraig-ssg",
+    "language": "Idris 2",
+    "description": "The DEFINITIVE Idris static site generator"
+  },
+  "rules": {
+    "language-policy": {
+      "src": ["idris"],
+      "adapters": ["rescript"],
+      "forbidden": ["python", "javascript", "typescript", "ruby", "go", "haskell"]
+    }
+  }
+}

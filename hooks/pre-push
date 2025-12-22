@@ -1,0 +1,43 @@
+#!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2025 hyperpolymath
+#
+# pre-push hook for ddraig-ssg
+# Runs tests before allowing push
+
+set -e
+
+echo "🐉 ddraig-ssg pre-push checks"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Check if build exists
+if [ ! -f "src/build/exec/ddraig" ]; then
+    echo "Building ddraig first..."
+    if command -v idris2 &> /dev/null; then
+        cd src && idris2 Ddraig.idr -o ddraig
+        cd ..
+    else
+        echo "⚠️ idris2 not found - skipping build and tests"
+        exit 0
+    fi
+fi
+
+# Run tests
+echo "Running tests..."
+./src/build/exec/ddraig test-markdown || {
+    echo "❌ Markdown tests failed"
+    exit 1
+}
+
+./src/build/exec/ddraig test-frontmatter || {
+    echo "❌ Frontmatter tests failed"
+    exit 1
+}
+
+./src/build/exec/ddraig test-full || {
+    echo "❌ Full pipeline tests failed"
+    exit 1
+}
+
+echo ""
+echo "✅ All tests passed - push allowed"
