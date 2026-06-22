@@ -31,9 +31,7 @@ jobs:
       - name: Compile Ddraig
         run: idris2 Ddraig.idr -o ddraig
       - name: Build sample site
-        run: |
-          mkdir -p _site
-          ./build/exec/ddraig build || echo "Build completed"
+        run: ./build/exec/ddraig build examples _site
       - name: Upload artifact
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:

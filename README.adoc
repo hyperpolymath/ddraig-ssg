@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Ddraig — a dependently-typed static-site generator
+:toc: macro
+:idris: https://www.idris-lang.org/[Idris 2]
+
+image:https://img.shields.io/badge/language-Idris%202-blue[Idris 2]
+image:https://img.shields.io/badge/licence-MPL--2.0-brightgreen[MPL-2.0]
+image:https://img.shields.io/badge/a11y-WCAG%202.2%20AAA--capable-success[WCAG 2.2 AAA-capable]
+
+*Ddraig* (Welsh for _dragon_) is a static-site generator written in pure
+{idris} — "types that breathe fire". It turns Markdown + front-matter into a
+complete, accessible website with no Node, npm, or Python in sight.
+
+toc::[]
+
+== Features
+
+* *Recursive multi-page build* — mirrors a source tree of `.md`/`.markdown`
+  into an output tree of `.html`.
+* *Front-matter* — `title`, `date`, `description`, `slug`, `site`/`brand`,
+  `tags`, `layout`/`template`, `draft` (drafts are skipped). Tolerates a
+  leading SPDX HTML comment before the `---` fence.
+* *Rich Markdown* — headings with anchor IDs, bold/italic/strikethrough,
+  inline code, links, images, blockquotes, ordered + unordered + nested lists,
+  pipe tables (with `<th scope="col">`), fenced code blocks with a language
+  class, horizontal rules, and *raw-HTML passthrough* for hero/card/badge
+  markup.
+* *Templating* — file-based layouts (`templates/<layout>.html`), partials
+  (`{{> name}}` from `templates/partials/`), a `{{toc}}` table of contents,
+  and a built-in accessible fallback template.
+* *Assets* — copies `assets/`, `static/`, `css/`, `js/`, `images/`, and
+  `public/` (the latter to the site root, so `/.well-known/security.txt`,
+  `CNAME`, `robots.txt`, `favicon.svg` ship).
+* *Discovery* — generates `sitemap.xml` and an Atom `feed.xml`.
+* *Accessibility* — the default theme is *WCAG 2.2 AAA-capable*: contrast-
+  verified ≥ 7:1 palette (light + dark), skip link, labelled landmarks,
+  visible `:focus-visible`, reduced-motion, reflow, and ≥ 44px targets.
+  See link:ACCESSIBILITY-CHECKLIST.adoc[ACCESSIBILITY-CHECKLIST.adoc] for the
+  engine-owned vs author-owned success criteria.
+
+== Build
+
+[source,bash]
+----
+idris2 Ddraig.idr -o ddraig      # produces build/exec/ddraig
+----
+
+Requires `idris2 >= 0.8.0`.
+
+== Usage
+
+[source,bash]
+----
+ddraig build <src-dir> <out-dir>   # build a site
+ddraig clean <out-dir>             # remove an output dir
+ddraig --version
+ddraig --help
+----
+
+A minimal example site lives in `examples/`:
+
+[source,bash]
+----
+./build/exec/ddraig build examples _site
+----
+
+== Source layout
+
+A site directory may contain:
+
+[source]
+----
+src/
+  index.md              # pages (front-matter + Markdown)
+  blog/post.md          # nested pages mirror into the output tree
+  templates/
+    default.html        # layout (overrides the built-in)
+    partials/header.html
+  assets/style.css      # copied as-is
+  public/               # copied to the OUTPUT ROOT
+    CNAME
+    .well-known/security.txt
+----
+
+== Licence
+
+Code is licensed under link:LICENSE[MPL-2.0]; prose documentation under
+`CC-BY-SA-4.0` (estate Rule 1). Ddraig was extracted, with history, from the
+`ssg-collection` monorepo to stand on its own.

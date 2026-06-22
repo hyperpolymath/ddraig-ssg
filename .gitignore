@@ -1,0 +1,8 @@
+# Idris 2 build output
+build/
+*.ttc
+*.ttm
+# editors / OS
+*~
+.DS_Store
+_site/

@@ -1,24 +1,47 @@
 {
   "name": "ddraig-ssg",
   "displayName": "Ddraig",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "language": "Idris 2",
-  "description": "Dependently typed SSG - types that breathe fire",
+  "description": "Dependently typed static-site generator - types that breathe fire",
   "author": "hyperpolymath",
-  "license": "MIT",
+  "license": "MPL-2.0",
   "paradigm": ["functional", "dependently-typed", "pure"],
   "features": {
-    "markdown": true,
+    "recursiveBuild": true,
     "frontmatter": true,
-    "templates": true,
     "drafts": true,
+    "markdown": true,
+    "headingAnchors": true,
+    "links": true,
+    "images": true,
+    "blockquotes": true,
+    "lists": true,
+    "nestedLists": true,
+    "tables": true,
+    "strikethrough": true,
     "codeBlocks": true,
-    "inlineFormatting": true
+    "languageClasses": true,
+    "rawHtmlPassthrough": true,
+    "inlineFormatting": true,
+    "templates": true,
+    "partials": true,
+    "tableOfContents": true,
+    "assetCopying": true,
+    "publicToRoot": true,
+    "sitemap": true,
+    "atomFeed": true,
+    "accessibility": "WCAG 2.2 AAA-capable"
   },
   "build": {
     "command": "idris2 Ddraig.idr -o ddraig",
     "runtime": "idris2 >= 0.8.0",
     "output": "build/exec/ddraig"
+  },
+  "usage": {
+    "build": "ddraig build <src> <out>",
+    "clean": "ddraig clean <out>",
+    "version": "ddraig --version"
   },
   "test": {
     "commands": [
@@ -30,8 +53,7 @@
   "ci": {
     "github-pages": {
       "container": "ghcr.io/idris-community/idris2:latest",
-      "install": "apk add --no-cache make",
-      "build": "idris2 Ddraig.idr -o ddraig && ./build/exec/ddraig build"
+      "build": "idris2 Ddraig.idr -o ddraig && ./build/exec/ddraig build examples _site"
     }
   }
 }
