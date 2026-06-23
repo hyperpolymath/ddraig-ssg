@@ -543,6 +543,15 @@ defTemplate = """
   <title>{{title}}</title>
   <meta name="description" content="{{description}}">
   <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="{{canonical}}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{brand}}">
+  <meta property="og:title" content="{{title}}">
+  <meta property="og:description" content="{{description}}">
+  <meta property="og:url" content="{{canonical}}">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="{{title}}">
+  <meta name="twitter:description" content="{{description}}">
   <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
@@ -734,14 +743,15 @@ stripPlaceholders s = pack (go (unpack s))
       else c :: go rest
 
 export
-applyTemplate : String -> Frontmatter -> String -> String -> String
-applyTemplate template fm htmlContent tocHtml =
+applyTemplate : String -> Frontmatter -> (canonical : String) -> String -> String -> String
+applyTemplate template fm canonical htmlContent tocHtml =
   let brand = if fm.brand == "" then fm.title else fm.brand
       t1 = strReplace template "{{title}}" (strEscape fm.title)
       t2 = strReplace t1 "{{date}}" (strEscape fm.date)
       t3 = strReplace t2 "{{description}}" (strEscape fm.description)
       t4 = strReplace t3 "{{brand}}" (strEscape brand)
-      t5 = strReplace t4 "{{toc}}" tocHtml
+      tc = strReplace t4 "{{canonical}}" (strEscape canonical)
+      t5 = strReplace tc "{{toc}}" tocHtml
       -- strip any remaining unfilled placeholders BEFORE injecting content,
       -- so author content (which may legitimately contain braces) is untouched
       t6 = stripPlaceholders t5
@@ -893,9 +903,18 @@ toHtmlPath rel =
 isMarkdown : String -> Bool
 isMarkdown p = strHasSuffix ".md" p || strHasSuffix ".markdown" p
 
+-- Join a base URL and a site-absolute path into an absolute URL. With an empty
+-- base the path is returned unchanged (best effort; a base URL is required for
+-- a fully conformant sitemap, recommended for the feed, and used for the
+-- per-page canonical/Open Graph URL).
+absUrl : (base : String) -> (path : String) -> String
+absUrl base path =
+  if base == "" then path
+  else (if strHasSuffix "/" base then substr 0 (length base `minus` 1) base else base) ++ path
+
 -- Build one markdown file. Returns Maybe Page (Nothing if draft skipped).
-buildOne : HasIO io => (src : String) -> (out : String) -> (rel : String) -> io (Maybe Page)
-buildOne src out rel = do
+buildOne : HasIO io => (src : String) -> (out : String) -> (base : String) -> (rel : String) -> io (Maybe Page)
+buildOne src out base rel = do
   let inPath = joinPath src rel
   r <- readFile inPath
   case r of
@@ -910,8 +929,9 @@ buildOne src out rel = do
            tpl <- loadTemplate src fm.template
            let title = if fm.title == "" then rel else fm.title
            let fm2 = { title := title } fm
-           let html = applyTemplate tpl fm2 md.body toc
            let relHtml = toHtmlPath rel
+           let canonical = absUrl base ("/" ++ relHtml)
+           let html = applyTemplate tpl fm2 canonical md.body toc
            let outPath = joinPath out relHtml
            _ <- mkDirP (dirOf outPath)
            w <- writeFile outPath html
@@ -971,15 +991,9 @@ copyPublic src out = do
 
 -- ----------------------------------------------------------------------------
 -- URL + date helpers for sitemap / Atom feed
+-- (absUrl is defined earlier, before buildOne, as the canonical-URL builder
+-- also uses it.)
 -- ----------------------------------------------------------------------------
-
--- Join a base URL and a site-absolute path into an absolute URL. With an empty
--- base the path is returned unchanged (best effort; a base URL is required for
--- a fully conformant sitemap, and recommended for the feed).
-absUrl : (base : String) -> (path : String) -> String
-absUrl base path =
-  if base == "" then path
-  else (if strHasSuffix "/" base then substr 0 (length base `minus` 1) base else base) ++ path
 
 -- A stable Atom id for a resource: an absolute URL when a base is set, else a
 -- urn: fallback so the feed is still valid Atom (RFC 4287 only requires an IRI).
@@ -1105,7 +1119,7 @@ buildSite src out base = do
     buildEach : List String -> io (List Page)
     buildEach [] = pure []
     buildEach (f :: fs) = do
-      mp <- buildOne src out f
+      mp <- buildOne src out base f
       rest <- buildEach fs
       pure (maybe rest (:: rest) mp)
 
@@ -1149,7 +1163,7 @@ testFull = do
   let content = "---\ntitle: Welcome\ndate: 2024-01-15\n---\n\n# Welcome\n\nThis is **Ddraig**, an Idris 2-powered SSG.\n\n- Dependently typed\n- Provably correct\n"
   let (fm, body) = parseFrontmatter content
   let md = parseMarkdownFull body
-  let output = applyTemplate defTemplate fm md.body (buildToc md.toc)
+  let output = applyTemplate defTemplate fm "/welcome.html" md.body (buildToc md.toc)
   putStrLn output
 
 -- ============================================================================
