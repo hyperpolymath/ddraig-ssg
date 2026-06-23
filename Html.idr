@@ -75,6 +75,11 @@ data Html : Type where
   Elem : (tag : String) -> List Attr -> List Html -> Html
   ||| An image: src plus a MANDATORY non-empty alt. Cannot be built otherwise.
   Img  : (src : String) -> Alt -> Html
+  ||| A decorative image: explicitly empty alt (WCAG: decorative images take
+  ||| alt=""). Kept distinct from `Img` so the "informative images carry
+  ||| non-empty alt" invariant stays exact -- decorative is a deliberate,
+  ||| visible choice, never an accidental empty `Img`.
+  DecorativeImg : (src : String) -> Html
 
 -- ============================================================================
 -- Rendering (total)
@@ -105,6 +110,8 @@ mutual
   render (Raw s)  = s
   render (Img src alt) =
     "<img src=\"" ++ escape src ++ "\" alt=\"" ++ escape (altText alt) ++ "\" />"
+  render (DecorativeImg src) =
+    "<img src=\"" ++ escape src ++ "\" alt=\"\" />"
   render (Elem tag attrs kids) =
     "<" ++ escape tag ++ concat (map renderAttr attrs) ++ ">"
       ++ renderForest kids

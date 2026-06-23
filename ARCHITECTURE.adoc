@@ -11,10 +11,12 @@ make "provably accessible / well-formed" a defensible claim rather than a slogan
 [NOTE]
 ====
 *Status:* accepted (positioning); architecture in progress. +
-The current binary (`Ddraig.idr`, v0.2) is the plain functional generator and
-embodies *none* of the proof machinery below yet. This document is the
-specification the code is being grown toward. The first theorem to land is
-`Html.idr` (see <<first-theorem>>).
+This document is the specification the code is being grown toward, and the
+growth has started: the typed HTML core (`Html.idr`, see <<first-theorem>>)
+has landed and now renders the engine's *inline* Markdown, so every image in
+built output is either a proof-carrying informative `Img` or an explicit
+decorative image. Block-level assembly and the template engine still use
+string concatenation; typing those is the next increment.
 ====
 
 toc::[]
