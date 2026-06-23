@@ -53,12 +53,12 @@ construction HTML core whose `render` is *total* and in which an image node
 cannot be constructed without non-empty alt text (WCAG 1.1.1 presence becomes
 an invariant of the AST). It is type-checked in CI on every push.
 
-The engine's *inline* Markdown rendering now flows through this core: the
-parser produces typed `Html` nodes and `render` emits the string, so every
-image in built output is either a proof-carrying informative image (non-empty
-alt, via `mkAlt`) or an explicit decorative image (`alt=""`) — never an
-accidental empty `alt`. Block-level and template rendering are still string-
-based; typing those is the next step.
+The engine's Markdown rendering now flows through this core — both inline
+content and *block structure* (headings, paragraphs, lists, blockquotes,
+tables, fenced code, thematic breaks) are parsed into typed `Html` nodes and
+emitted by the total `render`. So every image carries alt text and every block
+is well-formed by construction (matching open/close tags, valid nesting). Only
+the document template/layout is still string-based.
 
 == Build
 
