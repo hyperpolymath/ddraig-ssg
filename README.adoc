@@ -32,7 +32,9 @@ toc::[]
 * *Assets* — copies `assets/`, `static/`, `css/`, `js/`, `images/`, and
   `public/` (the latter to the site root, so `/.well-known/security.txt`,
   `CNAME`, `robots.txt`, `favicon.svg` ship).
-* *Discovery* — generates `sitemap.xml` and an Atom `feed.xml`.
+* *Discovery & SEO* — generates `sitemap.xml` and a valid Atom `feed.xml`
+  (absolute URLs when a base URL is given); the default template emits
+  `<link rel="canonical">` plus Open Graph and Twitter Card meta.
 * *Accessibility* — the default theme is *WCAG 2.2 AAA-capable*: contrast-
   verified ≥ 7:1 palette (light + dark), skip link, labelled landmarks,
   visible `:focus-visible`, reduced-motion, reflow, and ≥ 44px targets.
