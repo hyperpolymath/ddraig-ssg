@@ -74,11 +74,17 @@ Requires `idris2 >= 0.8.0`.
 
 [source,bash]
 ----
-ddraig build <src-dir> <out-dir>   # build a site
-ddraig clean <out-dir>             # remove an output dir
+ddraig build <src-dir> <out-dir> [base-url]   # build a site
+ddraig clean <out-dir>                         # remove an output dir
 ddraig --version
 ddraig --help
 ----
+
+`base-url` (e.g. `https://example.com`) is optional but recommended: it makes
+the `sitemap.xml` and Atom `feed.xml` URLs absolute. A sitemap requires
+absolute `<loc>` URLs to be valid, and the feed embeds absolute `<id>`/`<link>`
+values; without a base URL the feed still validates (it falls back to `urn:`
+ids) but the sitemap locations are relative.
 
 A minimal example site lives in `examples/`:
 

@@ -39,7 +39,7 @@
     "output": "build/exec/ddraig"
   },
   "usage": {
-    "build": "ddraig build <src> <out>",
+    "build": "ddraig build <src> <out> [base-url]",
     "clean": "ddraig clean <out>",
     "version": "ddraig --version"
   },

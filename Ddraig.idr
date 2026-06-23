@@ -11,6 +11,7 @@ import Data.List1
 import Data.Maybe
 import Data.String
 import System
+import System.Clock
 import System.Directory
 import System.File
 
@@ -323,16 +324,16 @@ closeLists st =
 closeBlocks : ParserState -> ParserState
 closeBlocks = closeLists . closeQuote . closePara
 
+-- A thematic break: a trimmed line of three or more of the same '-', '*' or
+-- '_'. (Previously only a handful of exact strings matched, so e.g. "------"
+-- was not recognised.)
 isHRule : String -> Bool
 isHRule s =
   let t = trim s
-  in (t == "---" || t == "***" || t == "___"
-      || t == "----" || t == "*****" || t == "___" )
-     && length t >= 3
-     && allSame (unpack t)
-  where allSame : List Char -> Bool
-        allSame [] = True
-        allSame (c :: cs) = all (== c) cs
+  in length t >= 3 && sameMark (unpack t)
+  where sameMark : List Char -> Bool
+        sameMark [] = False
+        sameMark (c :: cs) = (c == '-' || c == '*' || c == '_') && all (== c) cs
 
 -- Does a line look like raw HTML block (starts with a tag)?
 isRawHtml : String -> Bool
@@ -1036,9 +1037,62 @@ copyPublic src out = do
     putStrLn "  public/ -> output root"
     copyTree p out
 
--- sitemap.xml
-genSitemap : HasIO io => (out : String) -> List Page -> io ()
-genSitemap out pages = do
+-- ----------------------------------------------------------------------------
+-- URL + date helpers for sitemap / Atom feed
+-- ----------------------------------------------------------------------------
+
+-- Join a base URL and a site-absolute path into an absolute URL. With an empty
+-- base the path is returned unchanged (best effort; a base URL is required for
+-- a fully conformant sitemap, and recommended for the feed).
+absUrl : (base : String) -> (path : String) -> String
+absUrl base path =
+  if base == "" then path
+  else (if strHasSuffix "/" base then substr 0 (length base `minus` 1) base else base) ++ path
+
+-- A stable Atom id for a resource: an absolute URL when a base is set, else a
+-- urn: fallback so the feed is still valid Atom (RFC 4287 only requires an IRI).
+atomId : (base : String) -> (path : String) -> String
+atomId base path = if base == "" then "urn:ddraig:" ++ path else absUrl base path
+
+-- Normalise a front-matter date to an RFC 3339 timestamp for Atom <updated>:
+-- "YYYY-MM-DD" -> "YYYY-MM-DDT00:00:00Z"; values already carrying a time pass
+-- through; empty stays empty (the caller supplies a fallback).
+rfc3339 : String -> String
+rfc3339 d =
+  if d == "" then ""
+  else if 'T' `elem` unpack d then d
+  else d ++ "T00:00:00Z"
+
+-- Civil (year, month, day) from days since the Unix epoch, valid for days >= 0
+-- (every "now" qualifies). Hinnant's algorithm; non-negative integer arithmetic
+-- throughout, so div rounding is immaterial.
+civilFromDays : Integer -> (Integer, Integer, Integer)
+civilFromDays days =
+  let z   = days + 719468
+      era = z `div` 146097
+      doe = z - era * 146097
+      yoe = (doe - (doe `div` 1460) + (doe `div` 36524) - (doe `div` 146096)) `div` 365
+      y   = yoe + era * 400
+      doy = doe - (365 * yoe + (yoe `div` 4) - (yoe `div` 100))
+      mp  = (5 * doy + 2) `div` 153
+      d   = doy - ((153 * mp + 2) `div` 5) + 1
+      m   = if mp < 10 then mp + 3 else mp - 9
+  in (if m <= 2 then y + 1 else y, m, d)
+
+-- Current UTC date as "YYYY-MM-DD" (the feed <updated> fallback when no page
+-- carries a date).
+currentUtcDate : HasIO io => io String
+currentUtcDate = do
+  c <- liftIO (clockTime UTC)
+  let (y, m, d) = civilFromDays (seconds c `div` 86400)
+  pure (show y ++ "-" ++ pad2 m ++ "-" ++ pad2 d)
+  where
+    pad2 : Integer -> String
+    pad2 n = if n < 10 then "0" ++ show n else show n
+
+-- sitemap.xml (locs are absolute when a base URL is supplied)
+genSitemap : HasIO io => (base : String) -> (out : String) -> List Page -> io ()
+genSitemap base out pages = do
   let urls = concatMap entry pages
   let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
             ++ "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n"
@@ -1048,34 +1102,52 @@ genSitemap out pages = do
   putStrLn "  + sitemap.xml"
   where
     entry : Page -> String
-    entry pg = "  <url><loc>" ++ strEscape pg.url ++ "</loc>"
+    entry pg = "  <url><loc>" ++ strEscape (absUrl base pg.url) ++ "</loc>"
                ++ (if pg.fm.date == "" then "" else "<lastmod>" ++ strEscape pg.fm.date ++ "</lastmod>")
                ++ "</url>\n"
 
--- feed.xml (Atom)
-genFeed : HasIO io => (out : String) -> List Page -> io ()
-genFeed out pages = do
-  let entries = concatMap entry pages
+-- feed.xml (Atom). Emits every RFC 4287-required element: feed
+-- id/title/updated/author and per-entry id/title/updated. Ids and links are
+-- absolute when a base URL is supplied, urn: ids otherwise.
+genFeed : HasIO io => (base : String) -> (out : String) -> List Page -> io ()
+genFeed base out pages = do
+  now <- currentUtcDate
+  let dated = filter (/= "") (map (\pg => pg.fm.date) pages)
+  let feedUpdated = rfc3339 (case dated of
+                               [] => now
+                               _  => foldl (\a, b => if a >= b then a else b) "" dated)
+  let siteName = case filter (/= "") (map (\pg => pg.fm.brand) pages) of
+                   (b :: _) => b
+                   []       => "Ddraig Site"
+  let entries = concatMap (entry feedUpdated) pages
   let xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
             ++ "<feed xmlns=\"http://www.w3.org/2005/Atom\">\n"
-            ++ "  <title>Ddraig Site</title>\n"
+            ++ "  <title>" ++ strEscape siteName ++ "</title>\n"
+            ++ "  <id>" ++ strEscape (atomId base "/feed.xml") ++ "</id>\n"
+            ++ "  <updated>" ++ feedUpdated ++ "</updated>\n"
+            ++ "  <author><name>" ++ strEscape siteName ++ "</name></author>\n"
+            ++ (if base == "" then ""
+                else "  <link rel=\"self\" href=\"" ++ strEscape (absUrl base "/feed.xml") ++ "\"/>\n")
             ++ "  <generator>Ddraig SSG " ++ ddraigVersion ++ "</generator>\n"
             ++ entries
             ++ "</feed>\n"
   ignore (writeFile (joinPath out "feed.xml") xml)
   putStrLn "  + feed.xml"
   where
-    entry : Page -> String
-    entry pg = "  <entry>\n"
-               ++ "    <title>" ++ strEscape pg.fm.title ++ "</title>\n"
-               ++ "    <link href=\"" ++ strEscape pg.url ++ "\"/>\n"
-               ++ (if pg.fm.date == "" then "" else "    <updated>" ++ strEscape pg.fm.date ++ "</updated>\n")
-               ++ "    <summary>" ++ strEscape pg.fm.description ++ "</summary>\n"
-               ++ "  </entry>\n"
+    entry : (feedUpdated : String) -> Page -> String
+    entry feedUpdated pg =
+      let upd = let r = rfc3339 pg.fm.date in if r == "" then feedUpdated else r
+      in "  <entry>\n"
+         ++ "    <title>" ++ strEscape pg.fm.title ++ "</title>\n"
+         ++ "    <id>" ++ strEscape (atomId base pg.url) ++ "</id>\n"
+         ++ "    <link href=\"" ++ strEscape (absUrl base pg.url) ++ "\"/>\n"
+         ++ "    <updated>" ++ upd ++ "</updated>\n"
+         ++ "    <summary>" ++ strEscape pg.fm.description ++ "</summary>\n"
+         ++ "  </entry>\n"
 
 -- Full build command.
-buildSite : HasIO io => (src : String) -> (out : String) -> io ()
-buildSite src out = do
+buildSite : HasIO io => (src : String) -> (out : String) -> (base : String) -> io ()
+buildSite src out base = do
   putStrLn ("Ddraig build: " ++ src ++ " -> " ++ out)
   ok <- isDir src
   if not ok
@@ -1090,8 +1162,8 @@ buildSite src out = do
        copyAssets src out
        writeDefaultStyle src out
        copyPublic src out
-       genSitemap out pages
-       genFeed out pages
+       genSitemap base out pages
+       genFeed base out pages
        putStrLn ("Done. " ++ show (length pages) ++ " page(s) built.")
   where
     underSpecial : String -> Bool
@@ -1157,7 +1229,9 @@ usage = do
   putStrLn "Ddraig SSG - Idris 2 powered (\"types that breathe fire\")"
   putStrLn ""
   putStrLn "Usage:"
-  putStrLn "  ddraig build <src> <out>   Build a site"
+  putStrLn "  ddraig build <src> <out> [base-url]  Build a site"
+  putStrLn "        base-url (e.g. https://example.com) makes sitemap.xml and"
+  putStrLn "        feed.xml URLs absolute (recommended; required for a valid sitemap)"
   putStrLn "  ddraig clean <out>         Remove built files under <out>"
   putStrLn "  ddraig --version           Print version"
   putStrLn "  ddraig --help              This help"
@@ -1177,6 +1251,7 @@ main = do
     [_, "--help"] => usage
     [_, "-h"] => usage
     [_, "help"] => usage
-    [_, "build", src, out] => buildSite src out
+    [_, "build", src, out] => buildSite src out ""
+    [_, "build", src, out, base] => buildSite src out base
     [_, "clean", out] => cleanOut out
     _ => usage
