@@ -9,11 +9,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
-      image: ghcr.io/idris-community/idris2:latest
+      # idris2 + pack toolchain, digest-pinned (tag: latest) per estate SHA-pin policy.
+      # Replaces ghcr.io/idris-community/idris2:latest, whose :latest tag was removed upstream.
+      image: ghcr.io/stefan-hoeck/idris2-pack@sha256:f0758996a931fb35d9ecb1de273c4d59dabe2a09b433afc7e357f65a08b7e1ff
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Compile Ddraig
         run: idris2 Ddraig.idr -o ddraig
+      - name: Type-check typed HTML core (proof O2 + alt-presence)
+        run: idris2 --check Html.idr
       - name: Test Markdown
         run: ./build/exec/ddraig test-markdown
       - name: Test Frontmatter
@@ -24,7 +28,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
-      image: ghcr.io/idris-community/idris2:latest
+      # idris2 + pack toolchain, digest-pinned (tag: latest) per estate SHA-pin policy.
+      # Replaces ghcr.io/idris-community/idris2:latest, whose :latest tag was removed upstream.
+      image: ghcr.io/stefan-hoeck/idris2-pack@sha256:f0758996a931fb35d9ecb1de273c4d59dabe2a09b433afc7e357f65a08b7e1ff
     needs: test
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4

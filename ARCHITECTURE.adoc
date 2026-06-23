@@ -1,0 +1,227 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Ddraig in the verified-publishing stack
+:toc: macro
+:idris: https://www.idris-lang.org/[Idris 2]
+
+Architecture decision record and positioning brief — Ddraig's relationship to
+`casket-ssg`, `state-a2ml`, and `boj-server`, and the proof obligations that
+make "provably accessible / well-formed" a defensible claim rather than a slogan.
+
+[NOTE]
+====
+*Status:* accepted (positioning); architecture in progress. +
+The current binary (`Ddraig.idr`, v0.2) is the plain functional generator and
+embodies *none* of the proof machinery below yet. This document is the
+specification the code is being grown toward. The first theorem to land is
+`Html.idr` (see <<first-theorem>>).
+====
+
+toc::[]
+
+== Division of labour (proven ↔ practical)
+
+Ddraig and `casket-ssg` are the two ends of *one* spectrum over a *shared*
+substrate — not two implementations of the same generator.
+
+[cols="1,3",options="header"]
+|===
+| Repo | Role
+
+| *Ddraig* (Idris 2)
+| The *proof-carrying* SSG. Dependent types; output correctness and the
+  machine-decidable WCAG criteria are *theorems*, not conventions. The
+  reference answer to "can it be proven?".
+
+| *casket-ssg* (Haskell)
+| The *pragmatic* SSG. Ships today; carries the Gnosis a11y/KB layer;
+  poly-ssg reference implementation. Claims "*checked* at build time".
+|===
+
+== Shared substrate (neither SSG owns these)
+
+* *state-a2ml* — the STATE (Stateful Context Tracking Engine) format.
+* *`.machine_readable/descriptiles/*.a2ml`* — per-repo state instances; both
+  SSGs render *from* these. a2ml is the single source of truth; the SSGs are
+  consumers, not owners.
+* *stateful-artefacts-for-gitforges* — the cross-forge pipeline that maintains
+  the descriptiles.
+* *boj-server* — the estate MCP capability layer (Idris 2-verified ABI,
+  credential-isolated). Both SSGs are content *sources behind* boj-server, NOT
+  their own MCP servers. (Contrast: Emanote embeds an *unverified* MCP
+  in-binary — the anti-pattern this stack exists to avoid.)
+* *(proposed)* a shared CommonMark/a2ml content core in Zig with an
+  Idris 2-verified ABI — parse/validate once, consume from both SSGs. See
+  <<trust-boundaries>> for why the parser must not become load-bearing.
+
+== The proof boundary — three obligations
+
+The single most important clarification this record makes is that
+"provably accessible / well-formed" is *not one claim*. It is three obligations
+of very different difficulty, and they must be kept distinct so that each can
+be stated, scoped, and discharged on its own.
+
+[cols="1,2,1",options="header"]
+|===
+| # | Obligation | Difficulty
+
+| *O1* | *a2ml schema validity* — a *total* validator decides whether a
+  descriptile conforms to the schema.
+| Decidable; achievable now.
+
+| *O2* | *Output well-formedness* — a typed HTML AST in which malformed markup
+  is unrepresentable, with a *total* `render`.
+| Medium; self-contained; needs no a2ml.
+
+| *O3* | *Accessibility echo-invariant* — rendered output retains a witness
+  that it is the image of an accessible source (see <<echo>>).
+| Hard, and *necessarily partial* (see <<scoping>>).
+|===
+
+These compose in one direction: O1 gives a valid source, O2 gives well-formed
+output, O3 ties the output back to an accessible source. None of the three is
+load-bearing for the others' proofs, so they can be built and verified
+independently.
+
+[#scoping]
+== What "provably accessible" means — and what it cannot
+
+The accessibility invariant can only cover the *machine-decidable* subset of
+WCAG. This is not a limitation of effort; it is a property of the criteria.
+Critically, *the engine-owned / author-owned split already documented in
+`ACCESSIBILITY-CHECKLIST.adoc` is exactly the decidable / undecidable
+boundary.*
+
+[cols="1,3",options="header"]
+|===
+| Decidable → can be a theorem (engine-owned) | Undecidable → unprovable by anyone (author-owned)
+
+a| * Contrast ≥ 7:1 (arithmetic over the palette — a clean `Dec`)
+   * Landmark presence (`header`/`nav`/`main`/`footer`)
+   * Exactly one `<h1>`; non-skipping heading order
+   * Alt-text *presence*; `<th scope>` presence
+   * Focus ring / target-size invariants expressible in the typed CSS surface
+a| * Alt-text *meaningfulness* (1.1.1 quality)
+   * Link purpose out of context (2.4.9)
+   * Reading level (3.1.5)
+   * Caption / transcript / audio-description *quality* (1.2.x)
+|===
+
+[IMPORTANT]
+====
+The honest headline is therefore:
+
+[quote]
+Ddraig *provably* satisfies the decidable subset of WCAG 2.2 AAA; the remainder
+is *structurally* author-owned and is not provable by any engine.
+
+Do not let "provably accessible" stand unqualified. An unqualified claim is
+refuted by a single 3.1.5 counterexample; the scoped claim is not refutable at
+all, because it concedes precisely the criteria that are undecidable.
+====
+
+[#echo]
+== The echo-type, precisely
+
+The accessibility invariant is an *echo-type*: a dependent pair (Σ) pairing an
+output with a witness that it is the image of an accessible source under the
+renderer.
+
+[stem]
+++++
+Echo f y := (x : A) ** (f x = y)
+++++
+
+In Idris 2 that is literally the dependent pair `(x : A ** f x = y)` for a
+renderer `f : A -> B` and an output `y : B`. The construction is only as strong
+as its two ingredients:
+
+. *`A` must be accessible-by-construction.* The Σ proves "`y` is the image of
+  *some* `x`"; that is vacuous unless `A`'s constructors *forbid* the
+  inaccessible states. All the real work lives in what `A` refuses to
+  represent (e.g. an image node with empty alt — see <<first-theorem>>).
+. *`f` must be total.* A partial renderer cannot mechanically produce the
+  witness during a build.
+
+`casket-ssg`'s `FlexiText` is the *unverified Haskell shadow* of this type.
+Ddraig is where the proof lives natively.
+
+[#trust-boundaries]
+== Trust boundaries — the Zig content core
+
+The proposed Zig content core is the sharpest risk in the stack and must be
+handled explicitly.
+
+* An *Idris 2-verified ABI* verifies the *boundary* — calling convention, the
+  shape of data crossing the FFI — *not the parser*. A hand-rolled CommonMark
+  parser in Zig is unverified, partial, and memory-unsafe-by-default: exactly
+  the most bug-prone component, and it would sit *outside* the proof boundary
+  in the repository whose entire thesis is that the bug-prone components are
+  *inside* it.
+* *Resolution — parse-untrusted, validate-total.* The Zig core parses; a
+  *total* Idris 2 validator (O1) re-checks the result against the schema. Trust
+  then collapses onto validator totality — an obligation we already carry — and
+  the parser's correctness stops being load-bearing. This is "parse, don't
+  validate" inverted into "parse untrusted, then validate totally."
+* The parser must never be load-bearing for any proof. If a guarantee depends
+  on the parser being correct, the guarantee is not a proof.
+
+== Claim split and the consumer model
+
+* *Ddraig* may claim "*provably* …" (scoped per <<scoping>>). *casket-ssg*
+  claims "*checked* at build time". These must not be blurred.
+* *Precise consumer model.* Proofs do not cross language boundaries *as
+  proofs*. The accurate phrasing is *one prover (Ddraig), two trusting shadows
+  (casket-ssg, boj-server)*. The *witness* can travel as data inside a2ml; the
+  *guarantee* travels only if the consumer re-checks it. "One proof surface,
+  three consumers" is the aspiration; "one prover, two trusting shadows" is the
+  mechanism.
+
+== Proof-assistant policy
+
+* Load-bearing proofs default to a *single* assistant ({idris}) to keep the
+  trusted computing base small and to allow O1–O3 to *compose* into one
+  end-to-end statement.
+* Agda is admitted only where it buys genuine metatheoretic strength. Note that
+  proofs do not transfer between Idris 2 and Agda: split load-bearing proofs
+  across both and you get two islands that cannot be composed, and a doubled
+  TCB. Prefer one.
+
+== Borrowed from casket (Gnosis)
+
+Ideas to adopt at the typed boundary, re-expressed as theorems where possible:
+a2ml → template context, DAX conditionals, Shields-from-typed-metadata, auto
+`<th scope>`, and the WCAG 2.2 AAA-capable theme + `ACCESSIBILITY-CHECKLIST.adoc`.
+
+== Consequences
+
+* Ddraig stays a *minimal reference* that proves the core transforms; casket
+  does dynamic rendering (DAX, collections, pagination) at scale. The v0.2
+  generator's gaps (e.g. listing/taxonomy pages, a richer feed) are therefore
+  *casket's* concern first, not Ddraig's.
+* a2ml is now the real ceiling and the real contract. With multiple consumers
+  across multiple languages it *must* be versioned and shipped with a
+  conformance suite, or the shared substrate drifts.
+* A proper `src/` module layout and an `.ipkg` replace the single-file build as
+  the typed core grows. `Html.idr` is deliberately flat for now; this is the
+  next structural step.
+
+[#first-theorem]
+== First theorem: `Html.idr`
+
+The first load-bearing code (`Html.idr`) discharges *O2* and a concrete
+*fragment of O3*:
+
+* `render : Html -> String` is *total* — no partial path, no
+  "should-not-happen" guard. (O2: well-formedness.)
+* An `Img` node *cannot be constructed without a non-empty `Alt`*. WCAG 1.1.1
+  "images carry alt text" becomes an *invariant of the AST*, checked by the
+  type-checker, not a lint that runs afterward. (O3 fragment: alt *presence*,
+  which is decidable — alt *meaningfulness* remains author-owned per
+  <<scoping>>.)
+* Untrusted alt text (from a2ml / front-matter) enters only through a *total*
+  smart constructor that decides non-emptiness and returns `Maybe Alt` — the
+  boundary discipline of <<trust-boundaries>> in miniature.
+
+The module is `%default total` and is type-checked in CI on every push, so the
+theorem cannot silently regress.
