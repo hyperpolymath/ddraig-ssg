@@ -14,6 +14,8 @@ import System
 import System.Directory
 import System.File
 
+import Html
+
 %default covering
 
 ddraigVersion : String
@@ -184,13 +186,22 @@ parseFrontmatter content =
 
 -- ============================================================================
 -- Inline Markdown (bold/italic/code/strike/links/images)
+--
+-- Inline content is parsed into the typed, total Html core (Html.idr) and
+-- rendered from there. This is the build pipeline's trust boundary in
+-- miniature: `inlineNodes` is the untrusted (covering) parser; `Html.render`
+-- is the total renderer. Every image therefore flows through `Html.mkAlt`, so
+-- informative images provably carry non-empty alt text, and empty/whitespace
+-- alt becomes an explicit `DecorativeImg` (alt="") rather than a silent alt="".
+-- All inline HTML assembly now lives in the typed core, not string concat.
 -- ============================================================================
 
-doInline : String -> String
-doInline text = go (unpack text)
+-- Parse one line's inline Markdown into typed Html nodes. Consecutive plain
+-- characters are batched into a single Text node (held reversed in `buf`).
+inlineNodes : String -> List Html
+inlineNodes text = go (unpack text) []
   where
-    -- read until a delimiter substring is found; returns (before, after-delim)
-    -- as char lists; Nothing if not found.
+    -- read until a delimiter substring is found; returns (before, after-delim).
     splitOnStr : List Char -> List Char -> Maybe (List Char, List Char)
     splitOnStr delim cs = goS cs []
       where
@@ -200,7 +211,7 @@ doInline text = go (unpack text)
           if isPrefixOf (pack delim) (pack rest)
              then Just (reverse acc, drop (length delim) rest)
              else goS more (c :: acc)
-    -- read a balanced "[..]" then "(..)" for links/images
+    -- read a balanced "[..]" then "(..)" for links/images.
     readLink : List Char -> Maybe (String, String, List Char)
     readLink cs =
       case splitOnStr [']'] cs of
@@ -212,45 +223,61 @@ doInline text = go (unpack text)
                 Nothing => Nothing
                 Just (url, rest) => Just (pack txt, pack url, rest)
             _ => Nothing
-    go : List Char -> String
-    go [] = ""
+    -- the trust boundary: untrusted alt text enters via the total `mkAlt`.
+    imageNode : (alt : String) -> (url : String) -> Html
+    imageNode alt url =
+      case mkAlt alt of
+        Just a  => Img url a            -- informative: proof-carrying non-empty alt
+        Nothing => DecorativeImg url    -- empty/whitespace alt: explicit alt=""
+    -- flush the buffered plain-text run (reversed) as one Text node.
+    flush : List Char -> List Html -> List Html
+    flush []  rest = rest
+    flush buf rest = Text (pack (reverse buf)) :: rest
+    go : List Char -> List Char -> List Html
+    go [] buf = flush buf []
     -- image: ![alt](url)
-    go ('!' :: '[' :: rest) =
+    go ('!' :: '[' :: rest) buf =
       case readLink rest of
-        Just (alt, url, after) =>
-          "<img src=\"" ++ strEscape url ++ "\" alt=\"" ++ strEscape alt ++ "\" />" ++ go after
-        Nothing => "!" ++ go ('[' :: rest)
-    -- link: [text](url)
-    go ('[' :: rest) =
+        Just (alt, url, after) => flush buf (imageNode alt url :: go after [])
+        Nothing => go ('[' :: rest) ('!' :: buf)
+    -- link: [text](url)  (link text is itself parsed for inline markup)
+    go ('[' :: rest) buf =
       case readLink rest of
         Just (txt, url, after) =>
-          "<a href=\"" ++ strEscape url ++ "\">" ++ go (unpack txt) ++ "</a>" ++ go after
-        Nothing => "[" ++ go rest
-    -- strikethrough
-    go ('~' :: '~' :: rest) =
+          flush buf (Elem "a" [("href", url)] (inlineNodes txt) :: go after [])
+        Nothing => go rest ('[' :: buf)
+    -- strikethrough: ~~text~~
+    go ('~' :: '~' :: rest) buf =
       case splitOnStr ['~','~'] rest of
-        Just (inner, after) => "<del>" ++ go inner ++ "</del>" ++ go after
-        Nothing => "~~" ++ go rest
-    -- bold
-    go ('*' :: '*' :: rest) =
+        Just (inner, after) =>
+          flush buf (Elem "del" [] (inlineNodes (pack inner)) :: go after [])
+        Nothing => go rest ('~' :: '~' :: buf)
+    -- bold: **text**
+    go ('*' :: '*' :: rest) buf =
       case splitOnStr ['*','*'] rest of
-        Just (inner, after) => "<strong>" ++ go inner ++ "</strong>" ++ go after
-        Nothing => "**" ++ go rest
-    -- italic
-    go ('*' :: rest) =
+        Just (inner, after) =>
+          flush buf (Elem "strong" [] (inlineNodes (pack inner)) :: go after [])
+        Nothing => go rest ('*' :: '*' :: buf)
+    -- italic: *text*
+    go ('*' :: rest) buf =
       case splitOnStr ['*'] rest of
-        Just (inner, after) => "<em>" ++ go inner ++ "</em>" ++ go after
-        Nothing => "*" ++ go rest
-    -- inline code (verbatim, escaped)
-    go ('`' :: rest) =
+        Just (inner, after) =>
+          flush buf (Elem "em" [] (inlineNodes (pack inner)) :: go after [])
+        Nothing => go rest ('*' :: buf)
+    -- inline code: `code` (verbatim; Text escapes it and never re-parses)
+    go ('`' :: rest) buf =
       case splitOnStr ['`'] rest of
-        Just (inner, after) => "<code>" ++ strEscape (pack inner) ++ "</code>" ++ go after
-        Nothing => "`" ++ go rest
-    -- escape stray HTML-significant chars in plain text
-    go ('<' :: rest) = "&lt;" ++ go rest
-    go ('>' :: rest) = "&gt;" ++ go rest
-    go ('&' :: rest) = "&amp;" ++ go rest
-    go (c :: rest) = singleton c ++ go rest
+        Just (inner, after) =>
+          flush buf (Elem "code" [] [Text (pack inner)] :: go after [])
+        Nothing => go rest ('`' :: buf)
+    -- plain character: accumulate; <, >, & are escaped by Text on render.
+    go (c :: rest) buf = go rest (c :: buf)
+
+-- Render inline Markdown to an HTML string via the typed core. Signature is
+-- unchanged, so every caller (paragraphs, headings, lists, tables, quotes,
+-- the TOC) now emits typed-and-rendered HTML with no edits to those sites.
+doInline : String -> String
+doInline text = renderForest (inlineNodes text)
 
 -- ============================================================================
 -- Block-level Markdown Parser
