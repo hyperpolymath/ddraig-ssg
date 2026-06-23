@@ -39,11 +39,26 @@ toc::[]
   See link:ACCESSIBILITY-CHECKLIST.adoc[ACCESSIBILITY-CHECKLIST.adoc] for the
   engine-owned vs author-owned success criteria.
 
+== Architecture
+
+Ddraig is the *proof-carrying* end of a verified-publishing stack (the
+pragmatic end is `casket-ssg`). Output correctness and the machine-decidable
+WCAG criteria are intended to be *theorems*, not conventions. The positioning,
+the three proof obligations, and — importantly — the precise scope of what
+"provably accessible" can and cannot mean are recorded in
+link:ARCHITECTURE.adoc[ARCHITECTURE.adoc].
+
+The first piece of that proof surface is `Html.idr`: a typed, correct-by-
+construction HTML core whose `render` is *total* and in which an image node
+cannot be constructed without non-empty alt text (WCAG 1.1.1 presence becomes
+an invariant of the AST). It is type-checked in CI on every push.
+
 == Build
 
 [source,bash]
 ----
 idris2 Ddraig.idr -o ddraig      # produces build/exec/ddraig
+idris2 --check Html.idr           # type-check the typed HTML core (proof)
 ----
 
 Requires `idris2 >= 0.8.0`.

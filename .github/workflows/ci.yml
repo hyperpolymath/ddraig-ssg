@@ -14,6 +14,8 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       - name: Compile Ddraig
         run: idris2 Ddraig.idr -o ddraig
+      - name: Type-check typed HTML core (proof O2 + alt-presence)
+        run: idris2 --check Html.idr
       - name: Test Markdown
         run: ./build/exec/ddraig test-markdown
       - name: Test Frontmatter
