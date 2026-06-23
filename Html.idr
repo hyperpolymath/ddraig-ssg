@@ -80,6 +80,10 @@ data Html : Type where
   ||| non-empty alt" invariant stays exact -- decorative is a deliberate,
   ||| visible choice, never an accidental empty `Img`.
   DecorativeImg : (src : String) -> Html
+  ||| A void (self-closing) element: tag + attributes, no children. Renders
+  ||| `<tag ... />` (e.g. <hr/>). Distinct from `Elem` so void elements never
+  ||| get an invalid end tag.
+  Void : (tag : String) -> List Attr -> Html
 
 -- ============================================================================
 -- Rendering (total)
@@ -112,6 +116,8 @@ mutual
     "<img src=\"" ++ escape src ++ "\" alt=\"" ++ escape (altText alt) ++ "\" />"
   render (DecorativeImg src) =
     "<img src=\"" ++ escape src ++ "\" alt=\"\" />"
+  render (Void tag attrs) =
+    "<" ++ escape tag ++ concat (map renderAttr attrs) ++ " />"
   render (Elem tag attrs kids) =
     "<" ++ escape tag ++ concat (map renderAttr attrs) ++ ">"
       ++ renderForest kids

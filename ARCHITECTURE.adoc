@@ -13,10 +13,12 @@ make "provably accessible / well-formed" a defensible claim rather than a slogan
 *Status:* accepted (positioning); architecture in progress. +
 This document is the specification the code is being grown toward, and the
 growth has started: the typed HTML core (`Html.idr`, see <<first-theorem>>)
-has landed and now renders the engine's *inline* Markdown, so every image in
-built output is either a proof-carrying informative `Img` or an explicit
-decorative image. Block-level assembly and the template engine still use
-string concatenation; typing those is the next increment.
+has landed and now renders the engine's Markdown — both inline content and
+block structure (headings, lists, tables, blockquotes, fenced code, thematic
+breaks) parse into typed `Html` nodes emitted by the total `render`, so every
+image carries alt text and every block is well-formed by construction. Only the
+document template/layout still uses string concatenation; typing it is the next
+increment.
 ====
 
 toc::[]

@@ -291,38 +291,10 @@ record Heading where
   text  : String
   hslug : String
 
-record ParserState where
-  constructor MkState
-  html        : String
-  inPara      : Bool
-  inCode      : Bool
-  codeLang    : String
-  listStack   : List (Nat, Bool, Bool)  -- (indent, ordered?, nested?) innermost last
-  inQuote     : Bool
-  headings    : List Heading      -- reverse order of appearance
-
-initState : ParserState
-initState = MkState "" False False "" [] False []
-
-closePara : ParserState -> ParserState
-closePara st = if st.inPara then { html $= (++ "</p>\n"), inPara := False } st else st
-
-closeQuote : ParserState -> ParserState
-closeQuote st = if st.inQuote then { html $= (++ "</blockquote>\n"), inQuote := False } st else st
-
--- close all open lists
-closeLists : ParserState -> ParserState
-closeLists st =
-  case st.listStack of
-    [] => st
-    ((_, ordered, nested) :: rest) =>
-      let close : String := if ordered then "</ol>\n" else "</ul>\n"
-          tag : String := if nested then close ++ "</li>\n" else close
-      in closeLists ({ html $= (++ tag), listStack := rest } st)
-
--- close blocks that cannot contain the next non-list/non-quote line
-closeBlocks : ParserState -> ParserState
-closeBlocks = closeLists . closeQuote . closePara
+-- (The former string-accumulating ParserState machine, its close-helpers, the
+-- list-stack machinery, renderTable, step and parseAll have been replaced by
+-- the recursive-descent typed parser further below, which builds an Html tree
+-- and renders it via the total Html.render.)
 
 -- A thematic break: a trimmed line of three or more of the same '-', '*' or
 -- '_'. (Previously only a handful of exact strings matched, so e.g. "------"
@@ -373,64 +345,6 @@ unorderedItem s =
      else if strHasPrefix "+ " t then Just (trim (strDropPrefix "+ " t))
      else Nothing
 
--- Remove a single trailing "</li>\n" from a string, if present.  Used when a
--- nested list must be reparented INSIDE the previous <li> (valid HTML: a
--- <ul>/<ol> may not be a direct child of an <ol>/<ul>).
-dropTrailingLiClose : String -> String
-dropTrailingLiClose s =
-  if strHasSuffix "</li>\n" s
-     then substr 0 (length s `minus` 6) s
-     else s
-
--- open a list of the given (indent, ordered, nested?) on top of the stack.
--- `nested` means this list was opened inside the previous <li>, so when it is
--- later closed we must also re-close that parent <li>.
-openListN : Nat -> Bool -> Bool -> ParserState -> ParserState
-openListN ind ordered nested st =
-  let tag : String := if ordered then "<ol>\n" else "<ul>\n"
-  in { html $= (++ tag), listStack $= ((ind, ordered, nested) ::) } st
-
-openList : Nat -> Bool -> ParserState -> ParserState
-openList ind ordered st = openListN ind ordered False st
-
--- pop lists whose indent is greater than the given indent
-popDeeper : Nat -> ParserState -> ParserState
-popDeeper ind st =
-  case st.listStack of
-    ((i, ordered, nested) :: rest) =>
-      if i > ind
-         then let close : String := if ordered then "</ol>\n" else "</ul>\n"
-                  -- if nested, this list lived inside the parent <li>; close it
-                  tag : String := if nested then close ++ "</li>\n" else close
-              in popDeeper ind ({ html $= (++ tag), listStack := rest } st)
-         else st
-    [] => st
-
--- Handle a list item line at indent `ind`, ordered or not, with content `item`.
-doListItem : Nat -> Bool -> String -> ParserState -> ParserState
-doListItem ind ordered item st0 =
-  let st1 = closeQuote (closePara st0)
-      st2 = popDeeper ind st1
-  in case st2.listStack of
-       [] => addItem (openList ind ordered st2)
-       ((i, ord, _) :: _) =>
-         if i == ind
-            then if ord == ordered
-                    then addItem st2
-                    else addItem (openList ind ordered (closeTop st2))
-            else -- i < ind : nest a new list INSIDE the previous <li>
-                 let st3 = { html $= dropTrailingLiClose } st2
-                 in addItem (openListN ind ordered True st3)
-  where
-    closeTop : ParserState -> ParserState
-    closeTop s = case s.listStack of
-                   ((_, o, _) :: rest) =>
-                     let tag : String := if o then "</ol>\n" else "</ul>\n"
-                     in { html $= (++ tag), listStack := rest } s
-                   [] => s
-    addItem : ParserState -> ParserState
-    addItem s = { html $= (++ "<li>" ++ doInline item ++ "</li>\n") } s
-
 -- Table detection: a line of the form | --- | --- | (separator)
 isTableSep : String -> Bool
 isTableSep s =
@@ -453,115 +367,136 @@ splitRow s =
 -- parser passes the *list of remaining lines* and we consume as needed.
 -- ============================================================================
 
-renderTable : List String -> ParserState -> (ParserState, List String)
-renderTable (hdr :: sep :: rest) st =
-  let headers = splitRow hdr
-      st1 = { html $= (++ "<table>\n<thead>\n<tr>") } (closeBlocks st)
-      st2 = foldl (\s, h => { html $= (++ "<th scope=\"col\">" ++ doInline h ++ "</th>") } s) st1 headers
-      st3 = { html $= (++ "</tr>\n</thead>\n<tbody>\n") } st2
-      (st4, remaining) = body rest st3
-      st5 = { html $= (++ "</tbody>\n</table>\n") } st4
-  in (st5, remaining)
-  where
-    body : List String -> ParserState -> (ParserState, List String)
-    body ls s =
-      case ls of
-        (l :: more) =>
-          if isTableRow l
-             then let cells = splitRow l
-                      s1 = { html $= (++ "<tr>") } s
-                      s2 = foldl (\x, c => { html $= (++ "<td>" ++ doInline c ++ "</td>") } x) s1 cells
-                      s3 = { html $= (++ "</tr>\n") } s2
-                  in body more s3
-             else (s, ls)
-        [] => (s, [])
-renderTable other st = (st, other)
+-- A list-item line -> (indent, ordered?, content).
+listItemAt : String -> Maybe (Nat, Bool, String)
+listItemAt l =
+  case orderedItem l of
+    Just c  => Just (leadingIndent l, True, c)
+    Nothing => case unorderedItem l of
+                 Just c  => Just (leadingIndent l, False, c)
+                 Nothing => Nothing
 
--- Process one logical line; returns updated state and the remaining lines.
-step : List String -> ParserState -> (ParserState, List String)
-step [] st = (st, [])
-step (line :: rest) st =
-  let tr = trim line
-  in
-  -- inside fenced code: only ``` closes it
-  if st.inCode
-     then if strHasPrefix "```" tr
-             then ({ html $= (++ "</code></pre>\n"), inCode := False, codeLang := "" } st, rest)
-             else ({ html $= (++ strEscape line ++ "\n") } st, rest)
-  -- open fenced code (with optional language)
-  else if strHasPrefix "```" tr
-     then let lang = trim (strDropPrefix "```" tr)
-              st1 = closeBlocks st
-              opener = if lang == ""
-                          then "<pre><code>"
-                          else "<pre><code class=\"language-" ++ strEscape lang ++ "\">"
-          in ({ html $= (++ opener), inCode := True, codeLang := lang } st1, rest)
-  -- blank line: close paragraph/quote (keep lists open for loose handling? close them)
-  else if tr == ""
-     then (closeBlocks st, rest)
-  -- horizontal rule
-  else if isHRule line
-     then ({ html $= (++ "<hr />\n") } (closeBlocks st), rest)
-  -- pipe table (needs a separator on the next line)
-  else if isTableRow line
-     then case rest of
-            (sep :: more) =>
-              if isTableSep sep
-                 then renderTable (line :: sep :: more) st
-                 else fallthroughPara line tr st rest
-            _ => fallthroughPara line tr st rest
-  -- raw HTML passthrough (verbatim)
-  else if isRawHtml line
-     then ({ html $= (++ line ++ "\n") } (closeBlocks st), rest)
-  -- heading
-  else case headingLevel line of
-         Just (lvl, htext) =>
-           let sl = slugify htext
-               tag = "h" ++ show lvl
-               h = MkHeading lvl htext sl
-               st1 = closeBlocks st
-           in ({ html $= (++ "<" ++ tag ++ " id=\"" ++ sl ++ "\">"
-                              ++ doInline htext ++ "</" ++ tag ++ ">\n")
-               , headings $= (h ::) } st1, rest)
-         Nothing =>
-  -- ordered list
-           case orderedItem line of
-             Just item => (doListItem (leadingIndent line) True item st, rest)
-             Nothing =>
-  -- unordered list
-               case unorderedItem line of
-                 Just item => (doListItem (leadingIndent line) False item st, rest)
-                 Nothing =>
-  -- blockquote
-                   if strHasPrefix ">" tr
-                      then let inner = trim (strDropPrefix ">" tr)
-                               st1 = closeLists (closePara st)
-                               st2 = if st1.inQuote then st1
-                                     else { html $= (++ "<blockquote>\n"), inQuote := True } st1
-                               -- support one level of nesting: >> text
-                               body = if strHasPrefix ">" inner
-                                         then "<blockquote>" ++ doInline (trim (strDropPrefix ">" inner)) ++ "</blockquote>"
-                                         else doInline inner
-                           in ({ html $= (++ "<p>" ++ body ++ "</p>\n") } st2, rest)
-                      else fallthroughPara line tr st rest
-  where
-    fallthroughPara : String -> String -> ParserState -> List String -> (ParserState, List String)
-    fallthroughPara _ trimmed s remaining =
-      let s0 = closeLists (closeQuote s)
-          s1 = if not s0.inPara
-                  then { html $= (++ "<p>"), inPara := True } s0
-                  else { html $= (++ " ") } s0
-      in ({ html $= (++ doInline trimmed) } s1, remaining)
+isFence : String -> Bool
+isFence t = strHasPrefix "```" t
 
--- Drive the parser over all lines.
-parseAll : List String -> ParserState -> ParserState
-parseAll ls st =
-  case step ls st of
-    (st', []) => st'
-    (st', rest@(_ :: _)) =>
-      if length rest >= length ls
-         then st'  -- safety: no progress, stop (should not happen)
-         else parseAll rest st'
+-- Is the first remaining line a table separator (| --- | --- |)?
+nextIsSep : List String -> Bool
+nextIsSep (s :: _) = isTableSep s
+nextIsSep []       = False
+
+-- Drop one leading "> " (or ">") from a (possibly indented) quote line.
+stripQuote : String -> String
+stripQuote l = trim (strDropPrefix ">" (trim l))
+
+joinSpace : List String -> String
+joinSpace []        = ""
+joinSpace [x]       = x
+joinSpace (x :: xs) = x ++ " " ++ joinSpace xs
+
+-- Does a line continue a paragraph? (False at blanks and every block starter.)
+isParaLine : String -> Bool
+isParaLine x =
+  let t = trim x in
+  t /= "" && not (isFence t) && not (isHRule x) && not (isHeadingLine x)
+    && not (isTableRow x) && not (isRawHtml x) && not (strHasPrefix ">" t)
+    && not (isListLine x)
+  where
+    isHeadingLine : String -> Bool
+    isHeadingLine y = case headingLevel y of Just _ => True; Nothing => False
+    isListLine : String -> Bool
+    isListLine y = case listItemAt y of Just _ => True; Nothing => False
+
+-- The recursive-descent block parser. Each block becomes a typed Html node;
+-- nesting (lists, blockquotes) is ordinary recursion. Returns the block nodes
+-- plus the headings collected in document order (for the TOC).
+mutual
+  parseBlocks : List String -> (List Html, List Heading)
+  parseBlocks [] = ([], [])
+  parseBlocks (l :: ls) =
+    let t = trim l in
+    if t == "" then parseBlocks ls
+    else if isFence t then
+      let (node, rest) = parseFence l ls
+          (bs, hs) = parseBlocks rest
+      in (node :: bs, hs)
+    else if isHRule l then
+      let (bs, hs) = parseBlocks ls in (Void "hr" [] :: bs, hs)
+    else case headingLevel l of
+      Just (lvl, htext) =>
+        let sl = slugify htext
+            node = Elem ("h" ++ show lvl) [("id", sl)] (inlineNodes htext)
+            (bs, hs) = parseBlocks ls
+        in (node :: bs, MkHeading lvl htext sl :: hs)
+      Nothing =>
+        if isTableRow l && nextIsSep ls then
+          let (node, rest) = parseTable l ls
+              (bs, hs) = parseBlocks rest
+          in (node :: bs, hs)
+        else if isRawHtml l then
+          let (bs, hs) = parseBlocks ls in (Raw l :: bs, hs)
+        else if strHasPrefix ">" t then
+          let (qls, rest) = span (\x => strHasPrefix ">" (trim x)) (l :: ls)
+              (inner, ih) = parseBlocks (map stripQuote qls)
+              (bs, hs) = parseBlocks rest
+          in (Elem "blockquote" [] inner :: bs, ih ++ hs)
+        else case listItemAt l of
+          Just (ind, ord, _) =>
+            let (node, rest) = parseList ind ord (l :: ls)
+                (bs, hs) = parseBlocks rest
+            in (node :: bs, hs)
+          Nothing =>
+            let (cont, rest) = span isParaLine ls
+                text = joinSpace (map trim (l :: cont))
+                (bs, hs) = parseBlocks rest
+            in (Elem "p" [] (inlineNodes text) :: bs, hs)
+
+  -- Fenced code: `l` is the opening fence; gather lines until the closing one.
+  parseFence : String -> List String -> (Html, List String)
+  parseFence l ls =
+    let lang = trim (strDropPrefix "```" (trim l))
+        (code, rest) = break (\x => isFence (trim x)) ls
+        content = concatMap (\c => c ++ "\n") code
+        attrs = if lang == "" then [] else [("class", "language-" ++ lang)]
+    in (Elem "pre" [] [Elem "code" attrs [Text content]], drop 1 rest)
+
+  -- Pipe table: `hdr` is the header row; `ls` starts with the separator row.
+  parseTable : String -> List String -> (Html, List String)
+  parseTable hdr ls =
+    let headRow = Elem "tr" [] (map (\h => Elem "th" [("scope", "col")] (inlineNodes h)) (splitRow hdr))
+        (rows, rest) = span isTableRow (drop 1 ls)
+        body = map (\r => Elem "tr" [] (map (\c => Elem "td" [] (inlineNodes c)) (splitRow r))) rows
+    in (Elem "table" [] [Elem "thead" [] [headRow], Elem "tbody" [] body], rest)
+
+  -- A list at base indent + orderedness; `lns` starts with a matching item.
+  parseList : Nat -> Bool -> List String -> (Html, List String)
+  parseList base ord lns =
+    let (items, rest) = collectItems base ord lns
+    in (Elem (if ord then "ol" else "ul") [] items, rest)
+
+  -- Collect <li>s at exactly `base` indent with the `ord` marker; a more
+  -- indented following item becomes a nested list inside the preceding <li>.
+  collectItems : Nat -> Bool -> List String -> (List Html, List String)
+  collectItems _    _   [] = ([], [])
+  collectItems base ord (l :: ls) =
+    case listItemAt l of
+      Nothing => ([], l :: ls)
+      Just (ind, o, content) =>
+        if ind /= base || o /= ord then ([], l :: ls)
+        else
+          let (nested, rest1) = collectNested base ls
+              li = Elem "li" [] (inlineNodes content ++ nested)
+              (more, rest2) = collectItems base ord rest1
+          in (li :: more, rest2)
+
+  collectNested : Nat -> List String -> (List Html, List String)
+  collectNested _    [] = ([], [])
+  collectNested base (l :: ls) =
+    case listItemAt l of
+      Just (ind, o, _) =>
+        if ind > base
+           then let (sub, rest) = parseList ind o (l :: ls) in ([sub], rest)
+           else ([], l :: ls)
+      Nothing => ([], l :: ls)
 
 -- Result of parsing: HTML body + collected headings (in order).
 record MdResult where
@@ -571,11 +506,8 @@ record MdResult where
 
 parseMarkdownFull : String -> MdResult
 parseMarkdownFull content =
-  let allLines = lines content
-      final = parseAll allLines initState
-      st1 = closeBlocks final
-      st2 = if st1.inCode then { html $= (++ "</code></pre>\n") } st1 else st1
-  in MkMdResult st2.html (reverse st2.headings)
+  let (blocks, heads) = parseBlocks (lines content)
+  in MkMdResult (concatMap (\b => render b ++ "\n") blocks) heads
 
 export
 parseMarkdown : String -> String
