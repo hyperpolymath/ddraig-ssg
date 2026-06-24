@@ -18,12 +18,18 @@ jobs:
         run: idris2 Ddraig.idr -o ddraig
       - name: Type-check typed HTML core (proof O2 + alt-presence)
         run: idris2 --check Html.idr
+      - name: Type-check a2ml STATE validator (proof O1 - validateState total)
+        run: idris2 --check State.idr
       - name: Test Markdown
         run: ./build/exec/ddraig test-markdown
       - name: Test Frontmatter
         run: ./build/exec/ddraig test-frontmatter
       - name: Test Full Pipeline
         run: ./build/exec/ddraig test-full
+      - name: Test STATE validator (rejects invalid descriptile)
+        run: ./build/exec/ddraig test-state
+      - name: Validate this repo's STATE descriptile (a2ml O1)
+        run: ./build/exec/ddraig validate-state .machine_readable/descriptiles/STATE.a2ml
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15

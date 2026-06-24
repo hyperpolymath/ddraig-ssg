@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# STATE.a2ml — ddraig-ssg project state
+[metadata]
+project = "ddraig-ssg"
+version = "0.2.0"
+last-updated = "2026-06-24"
+status = "active"
+session = "typed core + a2ml STATE validator (O1) — 2026-06-24"
+
+[project-context]
+name = "Ddraig"
+purpose = """Dependently-typed, WCAG 2.2 AAA-capable static-site generator in Idris 2 — the proof-carrying end of the verified-publishing stack"""
+completion-percentage = 70
+
+[position]
+phase = "implementation"   # design | implementation | testing | maintenance | archived
+maturity = "experimental"  # experimental | alpha | beta | production | lts
+
+[route-to-mvp]
+milestones = [
+  "Typed HTML core with non-empty-alt invariant (Html.idr)",
+  "Inline + block Markdown rendered through the typed core",
+  "Valid Atom feed + absolute sitemap + canonical/OG meta",
+  "Total a2ml STATE descriptile validator (O1, State.idr)",
+]
+
+[blockers-and-issues]
+issues = [
+  "O1 STATE schema codified from a single example; pending reconciliation with the a2ml/state profile",
+  "O2/O3 not started: typed document template and the echo-types accessibility invariant",
+]
+
+[critical-next-actions]
+actions = [
+  "Confirm/adjust the STATE schema (required keys, phase enum)",
+  "O1 step 2: validate A2ML markup by reusing the standards src/A2ML core",
+  "Type the document template (retire the defTemplate string)",
+]
+
+[maintenance-status]
+last-run-utc = "2026-06-24T00:00:00Z"
+last-result = "pass"  # unknown | pass | warn | fail

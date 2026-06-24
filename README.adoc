@@ -78,9 +78,16 @@ Requires `idris2 >= 0.8.0`.
 ----
 ddraig build <src-dir> <out-dir> [base-url]   # build a site
 ddraig clean <out-dir>                         # remove an output dir
+ddraig validate-state <file.a2ml>              # validate an a2ml STATE descriptile
 ddraig --version
 ddraig --help
 ----
+
+`validate-state` runs the *total* `validateState` decision (`State.idr`) over a
+TOML-like a2ml STATE descriptile, reporting every schema violation (missing
+sections/keys, out-of-range values, bad enums) and exiting non-zero if any. This
+repo's own descriptile lives at `.machine_readable/descriptiles/STATE.a2ml` and
+is checked in CI. See link:ARCHITECTURE.adoc[ARCHITECTURE.adoc] (obligation O1).
 
 `base-url` (e.g. `https://example.com`) is optional but recommended: it makes
 the `sitemap.xml` and Atom `feed.xml` URLs absolute. A sitemap requires

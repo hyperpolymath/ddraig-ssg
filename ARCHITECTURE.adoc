@@ -70,7 +70,8 @@ be stated, scoped, and discharged on its own.
 | # | Obligation | Difficulty
 
 | *O1* | *a2ml schema validity* — a *total* validator decides whether a
-  descriptile conforms to the schema.
+  descriptile conforms to the schema. _First realization landed:_ `State.idr`
+  (`validateState`, `total`) for the TOML-like 6a2 STATE descriptile format.
 | Decidable; achievable now.
 
 | *O2* | *Output well-formedness* — a typed HTML AST in which malformed markup
@@ -81,6 +82,21 @@ be stated, scoped, and discharged on its own.
   that it is the image of an accessible source (see <<echo>>).
 | Hard, and *necessarily partial* (see <<scoping>>).
 |===
+
+[NOTE]
+====
+*Two a2ml formats, O1 staged.* The estate's `.a2ml` extension currently spans
+two distinct things: the *A2ML markup language* (the Djot-like surface in the
+`standards` repo's `SPEC.adoc`, with an Idris2 reference core under
+`src/A2ML/` and decidable `uniqueIdsDec`/`refsResolveDec` invariants), and the
+*TOML-like 6a2 STATE descriptile* format (`[section]` + `key = value`) that the
+SSGs actually render from. O1 is therefore staged: *(1)* a total validator for
+the STATE descriptile format — landed here as `State.idr` — and *(2)* validation
+of A2ML markup by reusing the upstream `src/A2ML/` core (the upstream checks are
+currently `partial`, so this is also where O1's *totality* keystone gets
+closed). The STATE schema in `State.idr` is codified from the canonical
+`STATE.a2ml`; reconciling it with the `a2ml/state` profile is tracked.
+====
 
 These compose in one direction: O1 gives a valid source, O2 gives well-formed
 output, O3 ties the output back to an accessible source. None of the three is
