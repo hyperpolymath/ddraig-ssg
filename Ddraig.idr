@@ -1148,7 +1148,7 @@ testMarkdown = do
 testFrontmatter : IO ()
 testFrontmatter = do
   putStrLn "=== Test: Frontmatter ==="
-  let content = "<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->\n---\ntitle: My Post\ndate: 2024-01-15\ntags: [idris, ssg]\ndraft: false\ndescription: hi\nsite: Ddraig\n---\n\nContent here\n"
+  let content = "<!-- SPDX-License-Identifier: MPL-2.0 -->\n---\ntitle: My Post\ndate: 2024-01-15\ntags: [idris, ssg]\ndraft: false\ndescription: hi\nsite: Ddraig\n---\n\nContent here\n"
   let (fm, body) = parseFrontmatter content
   putStrLn ("Title: " ++ fm.title)
   putStrLn ("Date: " ++ fm.date)
