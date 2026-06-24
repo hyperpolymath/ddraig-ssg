@@ -20,6 +20,8 @@ jobs:
         run: idris2 --check Html.idr
       - name: Type-check a2ml STATE validator (proof O1 - validateState total)
         run: idris2 --check State.idr
+      - name: Type-check accessibility attestation (proof O3 - echo types)
+        run: idris2 --check Attest.idr
       - name: Test Markdown
         run: ./build/exec/ddraig test-markdown
       - name: Test Frontmatter
@@ -28,6 +30,8 @@ jobs:
         run: ./build/exec/ddraig test-full
       - name: Test STATE validator (rejects invalid descriptile)
         run: ./build/exec/ddraig test-state
+      - name: Test a11y attestation (certifies accessible, rejects inaccessible)
+        run: ./build/exec/ddraig test-attest
       - name: Validate this repo's STATE descriptile (a2ml O1)
         run: ./build/exec/ddraig validate-state .machine_readable/descriptiles/STATE.a2ml
   build:

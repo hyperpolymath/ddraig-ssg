@@ -40,6 +40,13 @@ toc::[]
   visible `:focus-visible`, reduced-motion, reflow, and ≥ 44px targets.
   See link:ACCESSIBILITY-CHECKLIST.adoc[ACCESSIBILITY-CHECKLIST.adoc] for the
   engine-owned vs author-owned success criteria.
+* *Proof-carrying accessibility (O3)* — every page is run through a *total*
+  decision (`Attest.idr`) for the machine-decidable content-tree criteria
+  (exactly one `<h1>`, non-skipping headings; alt-presence is already a type
+  invariant). The build *fails* if any page is un-attestable, and emits a
+  per-page certificate at `/.well-known/accessibility-attestation.json`. A
+  certified page carries an *echo witness* that its output is the render of an
+  accessible source — see link:ARCHITECTURE.adoc[ARCHITECTURE.adoc] (O3).
 
 == Architecture
 

@@ -79,7 +79,12 @@ be stated, scoped, and discharged on its own.
 | Medium; self-contained; needs no a2ml.
 
 | *O3* | *Accessibility echo-invariant* — rendered output retains a witness
-  that it is the image of an accessible source (see <<echo>>).
+  that it is the image of an accessible source (see <<echo>>). _First
+  realization landed:_ `Attest.idr` — an `Attested` value carries
+  `echo : output = renderDoc source.blocks` over an `AccessibleDoc` (the
+  decidable content-tree subset: exactly one `<h1>`, non-skipping headings,
+  alt-presence). The build runs the total `certify` decision per page, fails
+  if any page is un-attestable, and emits a per-page certificate.
 | Hard, and *necessarily partial* (see <<scoping>>).
 |===
 

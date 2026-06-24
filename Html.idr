@@ -129,6 +129,15 @@ mutual
   renderForest []        = ""
   renderForest (h :: hs) = render h ++ renderForest hs
 
+||| Render a list of block nodes as a document body: each block rendered and
+||| followed by a newline. The canonical body string for a `List Html`; shared
+||| by the build pipeline and by the O3 attestation (Attest.idr) so the echo
+||| witness is over exactly the bytes that are written.
+public export
+renderDoc : List Html -> String
+renderDoc []        = ""
+renderDoc (b :: bs) = render b ++ "\n" ++ renderDoc bs
+
 -- ============================================================================
 -- Worked example (this type-checks)
 -- ============================================================================
