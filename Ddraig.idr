@@ -17,6 +17,7 @@ import System.File
 
 import Html
 import State
+import Attest
 
 %default covering
 
@@ -499,16 +500,18 @@ mutual
            else ([], l :: ls)
       Nothing => ([], l :: ls)
 
--- Result of parsing: HTML body + collected headings (in order).
+-- Result of parsing: HTML body + collected headings (in order) + the typed
+-- blocks (retained so the build can run the O3 accessibility decision over them).
 record MdResult where
   constructor MkMdResult
   body     : String
   toc      : List Heading
+  blocks   : List Html
 
 parseMarkdownFull : String -> MdResult
 parseMarkdownFull content =
   let (blocks, heads) = parseBlocks (lines content)
-  in MkMdResult (concatMap (\b => render b ++ "\n") blocks) heads
+  in MkMdResult (renderDoc blocks) heads blocks
 
 export
 parseMarkdown : String -> String
@@ -914,7 +917,9 @@ absUrl base path =
   else (if strHasSuffix "/" base then substr 0 (length base `minus` 1) base else base) ++ path
 
 -- Build one markdown file. Returns Maybe Page (Nothing if draft skipped).
-buildOne : HasIO io => (src : String) -> (out : String) -> (base : String) -> (rel : String) -> io (Maybe Page)
+-- Build one markdown file. Returns the Page plus its O3 certification status
+-- (certified?, violations). Nothing only when the file is a draft or unreadable.
+buildOne : HasIO io => (src : String) -> (out : String) -> (base : String) -> (rel : String) -> io (Maybe (Page, Bool, List String))
 buildOne src out base rel = do
   let inPath = joinPath src rel
   r <- readFile inPath
@@ -939,8 +944,14 @@ buildOne src out base rel = do
            case w of
              Left e => do putStrLn ("  ! write error: " ++ outPath); pure Nothing
              Right () => do
-               putStrLn ("  + " ++ rel ++ " -> " ++ relHtml)
-               pure (Just (MkPage ("/" ++ relHtml) fm2))
+               -- O3: the total accessibility decision over the typed content tree.
+               let (certified, viols) = case certify md.blocks of
+                                          Right _  => (True, the (List String) [])
+                                          Left  vs => (False, vs)
+               putStrLn ("  + " ++ rel ++ " -> " ++ relHtml
+                          ++ (if certified then "  [a11y ok]" else "  [a11y FAIL]"))
+               traverse_ (\v => putStrLn ("    a11y: " ++ v)) viols
+               pure (Just (MkPage ("/" ++ relHtml) fm2, certified, viols))
 
 -- Copy known asset dirs (assets/static/css/js/images) preserving name.
 copyAssets : HasIO io => (src : String) -> (out : String) -> io ()
@@ -1093,6 +1104,44 @@ genFeed base out pages = do
          ++ "  </entry>\n"
 
 -- Full build command.
+-- Escape a string for embedding inside a JSON string literal.
+jsonEsc : String -> String
+jsonEsc s = concat (map e (unpack s))
+  where
+    e : Char -> String
+    e '"'  = "\\\""
+    e '\\' = "\\\\"
+    e '\n' = "\\n"
+    e c    = singleton c
+
+-- Emit the O3 attestation certificate: one record per page stating whether it
+-- satisfies the decidable accessibility predicates, and any violations. A page
+-- marked `certified: true` is so because `certify` produced the proof.
+writeAttestation : HasIO io => (base : String) -> (out : String) -> (now : String)
+                -> List (Page, Bool, List String) -> io ()
+writeAttestation base out now results = do
+  let entries = concat (intersperse ",\n" (map entryJson results))
+  let json = "{\n"
+          ++ "  \"generator\": \"Ddraig SSG " ++ ddraigVersion ++ "\",\n"
+          ++ "  \"generated\": \"" ++ now ++ "T00:00:00Z\",\n"
+          ++ "  \"scope\": \"decidable WCAG subset (content tree)\",\n"
+          ++ "  \"predicates\": [\"one-h1\", \"heading-no-skip\", \"alt-present-by-construction\"],\n"
+          ++ "  \"pages\": [\n" ++ entries ++ "\n  ]\n"
+          ++ "}\n"
+  let dst = joinPath out ".well-known/accessibility-attestation.json"
+  _ <- mkDirP (dirOf dst)
+  ignore (writeFile dst json)
+  putStrLn "  + .well-known/accessibility-attestation.json"
+  where
+    entryJson : (Page, Bool, List String) -> String
+    entryJson (p, certified, viols) =
+      "    {\"page\": \"" ++ jsonEsc (absUrl base p.url)
+        ++ "\", \"certified\": " ++ (if certified then "true" else "false")
+        ++ ", \"violations\": ["
+        ++ concat (intersperse ", " (map (\v => "\"" ++ jsonEsc v ++ "\"") viols))
+        ++ "]}"
+
+-- Full build command.
 buildSite : HasIO io => (src : String) -> (out : String) -> (base : String) -> io ()
 buildSite src out base = do
   putStrLn ("Ddraig build: " ++ src ++ " -> " ++ out)
@@ -1105,19 +1154,29 @@ buildSite src out base = do
        -- skip files under templates/, public/, and the asset dirs (handled separately)
        let mdFiles = filter (\p => isMarkdown p && not (underSpecial p)) all
        putStrLn ("Found " ++ show (length mdFiles) ++ " markdown file(s).")
-       pages <- buildEach mdFiles
+       results <- buildEach mdFiles
+       let pages = map (\(p, _, _) => p) results
        copyAssets src out
        writeDefaultStyle src out
        copyPublic src out
        genSitemap base out pages
        genFeed base out pages
+       now <- currentUtcDate
+       writeAttestation base out now results
        putStrLn ("Done. " ++ show (length pages) ++ " page(s) built.")
+       let failed = filter (\(_, c, _) => not c) results
+       when (not (null failed)) $ do
+         putStrLn ("ACCESSIBILITY: " ++ show (length failed) ++ " page(s) failed certification:")
+         traverse_ (\(p, _, vs) => do
+                      putStrLn ("  " ++ p.url)
+                      traverse_ (\v => putStrLn ("    - " ++ v)) vs) failed
+         exitFailure
   where
     underSpecial : String -> Bool
     underSpecial p =
       any (\d => strHasPrefix (d ++ "/") p)
           ["templates","public","assets","static","css","js","images"]
-    buildEach : List String -> io (List Page)
+    buildEach : List String -> io (List (Page, Bool, List String))
     buildEach [] = pure []
     buildEach (f :: fs) = do
       mp <- buildOne src out base f
@@ -1199,6 +1258,23 @@ testState = do
      then do putStrLn "FAIL: invalid descriptile not rejected"; exitFailure
      else putStrLn "OK: invalid descriptile rejected"
 
+-- O3 assertion: an accessible document certifies; an inaccessible one (two
+-- <h1>, a skipped heading level) is rejected by the total `certify` decision.
+testAttest : IO ()
+testAttest = do
+  putStrLn "=== Test: a11y attestation (O3) ==="
+  let good = parseMarkdownFull "# One\n\nsome text\n\n## Two\n"
+  let bad  = parseMarkdownFull "# One\n\n# Two\n\n### Skip\n"
+  case certify good.blocks of
+    Right _  => putStrLn "OK: accessible document certified"
+    Left  vs => do putStrLn "FAIL: accessible document not certified"
+                   traverse_ (\v => putStrLn ("  - " ++ v)) vs
+                   exitFailure
+  case certify bad.blocks of
+    Left vs => do putStrLn ("OK: inaccessible document rejected (" ++ show (length vs) ++ " violation(s))")
+                  traverse_ (\v => putStrLn ("  - " ++ v)) vs
+    Right _ => do putStrLn "FAIL: inaccessible document certified"; exitFailure
+
 -- ============================================================================
 -- Main
 -- ============================================================================
@@ -1217,7 +1293,7 @@ usage = do
   putStrLn "  ddraig --help              This help"
   putStrLn ""
   putStrLn "Test subcommands:"
-  putStrLn "  ddraig test-markdown | test-frontmatter | test-full | test-state"
+  putStrLn "  ddraig test-markdown | test-frontmatter | test-full | test-state | test-attest"
 
 main : IO ()
 main = do
@@ -1227,6 +1303,7 @@ main = do
     [_, "test-frontmatter"] => testFrontmatter
     [_, "test-full"] => testFull
     [_, "test-state"] => testState
+    [_, "test-attest"] => testAttest
     [_, "--version"] => putStrLn ("ddraig " ++ ddraigVersion)
     [_, "-v"] => putStrLn ("ddraig " ++ ddraigVersion)
     [_, "--help"] => usage
