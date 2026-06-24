@@ -16,6 +16,7 @@ import System.Directory
 import System.File
 
 import Html
+import State
 
 %default covering
 
@@ -1167,6 +1168,38 @@ testFull = do
   putStrLn output
 
 -- ============================================================================
+-- a2ml STATE descriptile validation (O1)
+-- ============================================================================
+
+-- Validate a STATE descriptile file: parse (untrusted) then run the total
+-- `validateState` decision. Exits non-zero on any violation.
+validateStateFile : HasIO io => String -> io ()
+validateStateFile path = do
+  r <- readFile path
+  case r of
+    Left _ => do putStrLn ("ERROR: cannot read " ++ path); exitFailure
+    Right content => do
+      let errs = validateState (parseState content)
+      if null errs
+         then putStrLn ("OK: " ++ path ++ " is a valid STATE descriptile")
+         else do
+           putStrLn ("INVALID: " ++ path ++ " (" ++ show (length errs) ++ " violation(s))")
+           traverse_ (\e => putStrLn ("  - " ++ e)) errs
+           exitFailure
+
+-- Negative assertion: a deliberately broken descriptile MUST be rejected.
+testState : IO ()
+testState = do
+  putStrLn "=== Test: STATE validator ==="
+  let bad = "[metadata]\nproject = \"x\"\n\n[position]\nphase = \"bogus\"\nmaturity = \"experimental\"\n"
+  let errs = validateState (parseState bad)
+  putStrLn ("violations: " ++ show (length errs))
+  traverse_ (\e => putStrLn ("  - " ++ e)) errs
+  if null errs
+     then do putStrLn "FAIL: invalid descriptile not rejected"; exitFailure
+     else putStrLn "OK: invalid descriptile rejected"
+
+-- ============================================================================
 -- Main
 -- ============================================================================
 
@@ -1179,11 +1212,12 @@ usage = do
   putStrLn "        base-url (e.g. https://example.com) makes sitemap.xml and"
   putStrLn "        feed.xml URLs absolute (recommended; required for a valid sitemap)"
   putStrLn "  ddraig clean <out>         Remove built files under <out>"
+  putStrLn "  ddraig validate-state <file.a2ml>  Validate an a2ml STATE descriptile"
   putStrLn "  ddraig --version           Print version"
   putStrLn "  ddraig --help              This help"
   putStrLn ""
   putStrLn "Test subcommands:"
-  putStrLn "  ddraig test-markdown | test-frontmatter | test-full"
+  putStrLn "  ddraig test-markdown | test-frontmatter | test-full | test-state"
 
 main : IO ()
 main = do
@@ -1192,6 +1226,7 @@ main = do
     [_, "test-markdown"] => testMarkdown
     [_, "test-frontmatter"] => testFrontmatter
     [_, "test-full"] => testFull
+    [_, "test-state"] => testState
     [_, "--version"] => putStrLn ("ddraig " ++ ddraigVersion)
     [_, "-v"] => putStrLn ("ddraig " ++ ddraigVersion)
     [_, "--help"] => usage
@@ -1200,4 +1235,5 @@ main = do
     [_, "build", src, out] => buildSite src out ""
     [_, "build", src, out, base] => buildSite src out base
     [_, "clean", out] => cleanOut out
+    [_, "validate-state", path] => validateStateFile path
     _ => usage
