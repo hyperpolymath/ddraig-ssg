@@ -1,0 +1,150 @@
+<!--
+SPDX-License-Identifier: CC-BY-SA-4.0
+SPDX-FileCopyrightText: 2025-2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+-->
+
+![Idris 2](https://img.shields.io/badge/language-Idris%202-blue)
+![MPL-2](https://img.shields.io/badge/licence-MPL--2.0-brightgreen) ![WCAG 2.2
+AAA-capable](https://img.shields.io/badge/a11y-WCAG%202.2%20AAA--capable-success)
+
+**Ddraig** (Welsh for *dragon*) is a static-site generator written in
+pure https://www.idris-lang.org/\[Idris 2\] — "types that breathe fire".
+It turns Markdown + front-matter into a complete, accessible website
+with no Node, npm, or Python in sight.
+
+<div id="toc">
+
+</div>
+
+# Features
+
+- **Recursive multi-page build** — mirrors a source tree of
+  `.md`/`.markdown` into an output tree of `.html`.
+
+- **Front-matter** — `title`, `date`, `description`, `slug`,
+  `site`/`brand`, `tags`, `layout`/`template`, `draft` (drafts are
+  skipped). Tolerates a leading SPDX HTML comment before the `---`
+  fence.
+
+- **Rich Markdown** — headings with anchor IDs,
+  bold/italic/strikethrough, inline code, links, images, blockquotes,
+  ordered + unordered + nested lists, pipe tables (with `<th`
+  `scope="col">`), fenced code blocks with a language class, horizontal
+  rules, and **raw-HTML passthrough** for hero/card/badge markup.
+
+- **Templating** — file-based layouts (`templates/<layout>.html`),
+  partials (`{{>` `name}}` from `templates/partials/`), a `{macro}`
+  table of contents, and a built-in accessible fallback template.
+
+- **Assets** — copies `assets/`, `static/`, `css/`, `js/`, `images/`,
+  and `public/` (the latter to the site root, so
+  `/.well-known/security.txt`, `CNAME`, `robots.txt`, `favicon.svg`
+  ship).
+
+- **Discovery & SEO** — generates `sitemap.xml` and a valid Atom
+  `feed.xml` (absolute URLs when a base URL is given); the default
+  template emits `<link` `rel="canonical">` plus Open Graph and Twitter
+  Card meta.
+
+- **Accessibility** — the default theme is **WCAG 2.2 AAA-capable**:
+  contrast- verified ≥ 7:1 palette (light + dark), skip link, labelled
+  landmarks, visible `:focus-visible`, reduced-motion, reflow, and ≥
+  44px targets. See <a href="ACCESSIBILITY-CHECKLIST.adoc"
+  class="adoc">ACCESSIBILITY-CHECKLIST</a> for the engine-owned vs
+  author-owned success criteria.
+
+- **Proof-carrying accessibility (O3)** — every page is run through a
+  **total** decision (`Attest.idr`) for the machine-decidable
+  content-tree criteria (exactly one `<h1>`, non-skipping headings;
+  alt-presence is already a type invariant). The build **fails** if any
+  page is un-attestable, and emits a per-page certificate at
+  `/.well-known/accessibility-attestation.json`. A certified page
+  carries an **echo witness** that its output is the render of an
+  accessible source — see
+  <a href="ARCHITECTURE.adoc" class="adoc">ARCHITECTURE</a> (O3).
+
+# Architecture
+
+Ddraig is the **proof-carrying** end of a verified-publishing stack (the
+pragmatic end is `casket-ssg`). Output correctness and the
+machine-decidable WCAG criteria are intended to be **theorems**, not
+conventions. The positioning, the three proof obligations, and —
+importantly — the precise scope of what "provably accessible" can and
+cannot mean are recorded in
+<a href="ARCHITECTURE.adoc" class="adoc">ARCHITECTURE</a>.
+
+The first piece of that proof surface is `Html.idr`: a typed,
+correct-by- construction HTML core whose `render` is **total** and in
+which an image node cannot be constructed without non-empty alt text
+(WCAG 1.1.1 presence becomes an invariant of the AST). It is
+type-checked in CI on every push.
+
+The engine’s Markdown rendering now flows through this core — both
+inline content and **block structure** (headings, paragraphs, lists,
+blockquotes, tables, fenced code, thematic breaks) are parsed into typed
+`Html` nodes and emitted by the total `render`. So every image carries
+alt text and every block is well-formed by construction (matching
+open/close tags, valid nesting). Only the document template/layout is
+still string-based.
+
+# Build
+
+```bash
+idris2 Ddraig.idr -o ddraig      # produces build/exec/ddraig
+idris2 --check Html.idr           # type-check the typed HTML core (proof)
+```
+
+Requires `idris2` `>=` `0.8.0`.
+
+# Usage
+
+```bash
+ddraig build <src-dir> <out-dir> [base-url]   # build a site
+ddraig clean <out-dir>                         # remove an output dir
+ddraig validate-state <file.a2ml>              # validate an a2ml STATE descriptile
+ddraig --version
+ddraig --help
+```
+
+`validate-state` runs the **total** `validateState` decision
+(`State.idr`) over a TOML-like a2ml STATE descriptile, reporting every
+schema violation (missing sections/keys, out-of-range values, bad enums)
+and exiting non-zero if any. This repo’s own descriptile lives at
+`.machine_readable/descriptiles/STATE.a2ml` and is checked in CI. See
+<a href="ARCHITECTURE.adoc" class="adoc">ARCHITECTURE</a> (obligation
+O1).
+
+`base-url` (e.g. [`https://example.com`](https://example.com)) is
+optional but recommended: it makes the `sitemap.xml` and Atom `feed.xml`
+URLs absolute. A sitemap requires absolute `<loc>` URLs to be valid, and
+the feed embeds absolute `<id>`/`<link>` values; without a base URL the
+feed still validates (it falls back to `urn:` ids) but the sitemap
+locations are relative.
+
+A minimal example site lives in `examples/`:
+
+```bash
+./build/exec/ddraig build examples _site
+```
+
+# Source layout
+
+A site directory may contain:
+
+    src/
+      index.md              # pages (front-matter + Markdown)
+      blog/post.md          # nested pages mirror into the output tree
+      templates/
+        default.html        # layout (overrides the built-in)
+        partials/header.html
+      assets/style.css      # copied as-is
+      public/               # copied to the OUTPUT ROOT
+        CNAME
+        .well-known/security.txt
+
+# Licence
+
+Code is licensed under <a href="LICENSE" class="0">MPL-2</a>; prose
+documentation under `CC-BY-SA-4.0` (estate Rule 1). Ddraig was
+extracted, with history, from the `ssg-collection` monorepo to stand on
+its own.
