@@ -540,12 +540,12 @@ buildToc hs =
 defTemplate : String
 defTemplate = """
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" prefix="rdf: http://www.w3.org/1999/02/22-rdf-syntax-ns# rdfs: http://www.w3.org/2000/01/rdf-schema# owl: http://www.w3.org/2002/07/owl# schema: http://schema.org/">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{title}}</title>
-  <meta name="description" content="{{description}}">
+  <title property="schema:name">{{title}}</title>
+  <meta name="description" property="schema:description" content="{{description}}">
   <meta name="color-scheme" content="light dark">
   <link rel="canonical" href="{{canonical}}">
   <meta property="og:type" content="website">
@@ -558,27 +558,28 @@ defTemplate = """
   <meta name="twitter:description" content="{{description}}">
   <link rel="stylesheet" href="/assets/style.css">
 </head>
-<body>
+<body typeof="schema:WebPage">
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="site-header">
-    <nav class="container nav" aria-label="Primary">
-      <a class="brand" href="/">{{brand}}</a>
+  <header class="site-header" role="banner">
+    <nav class="container nav" aria-label="Primary" role="navigation" typeof="schema:SiteNavigationElement">
+      <a class="brand" href="/" property="schema:url"><span property="schema:name">{{brand}}</span></a>
       <ul class="nav-links">
-        <li><a href="/">Home</a></li>
+        <li><a href="/" property="schema:url">Home</a></li>
       </ul>
     </nav>
   </header>
 
-  <main id="main" class="container" tabindex="-1">
-    <article class="prose">
+  <main id="main" class="container" tabindex="-1" role="main">
+    <article class="prose" role="article" typeof="schema:Article">
+      <meta property="schema:datePublished" content="{{date}}">
       {{content}}
     </article>
   </main>
 
-  <footer class="site-footer">
+  <footer class="site-footer" role="contentinfo">
     <div class="container">
-      <p class="muted">Built with ddraig-ssg · <time>{{date}}</time></p>
+      <p class="muted">Built with ddraig-ssg &middot; <time property="schema:dateModified">{{date}}</time></p>
     </div>
   </footer>
 </body>
