@@ -1,0 +1,33 @@
+== 
+
+title: Ddraig site: Ddraig description: A dependently-typed static-site
+generator written in Idris 2. date: 2026-06-22 —
+
+== Ddraig
+
+Types that breathe fire. A static-site generator in pure Idris 2.
+
+____
+Built-in accessible theme, WCAG 2.2 AAA-capable.
+____
+
+=== Feature matrix
+
+[cols=",",options="header",]
+|===
+|Feature |Status
+|Markdown |full
+|Tables |yes
+|Raw HTML |yes
+|===
+
+=== Code
+
+[source,idris]
+----
+main : IO ()
+main = putStrLn "Ddraig"
+----
+
+See the link:/about.html[getting-started page] and the project
+https://github.com/hyperpolymath/ddraig-ssg[README].

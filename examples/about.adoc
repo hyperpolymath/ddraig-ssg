@@ -1,0 +1,10 @@
+== 
+
+title: Getting started site: Ddraig description: How to build a site
+with Ddraig. date: 2026-06-22 —
+
+== Getting started
+
+[arabic]
+. Compile: `+idris2 Ddraig.idr -o ddraig+`
+. Build: `+ddraig build examples _site+`
