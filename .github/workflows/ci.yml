@@ -55,6 +55,11 @@ jobs:
         # site moves to a custom domain.
         run: ./build/exec/ddraig build examples _site https://hyperpolymath.github.io/ddraig-ssg
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        # v5 pins its inner actions/upload-artifact to a commit SHA; v3 used the
+        # `@v4` tag, which the SHA-pin policy rejects at job set-up. v4+ drops
+        # dotfiles by default, so keep them: .well-known/ carries the O3
+        # accessibility attestation.
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: _site
+          include-hidden-files: true
