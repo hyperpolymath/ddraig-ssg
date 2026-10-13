@@ -113,8 +113,9 @@ the model's; <<mapping>> shows where each one goes in each format.
 | `self` | Absolute URL of this feed file.
 | `description` | Site description _(WP1)_, else `<title> feed`.
 | `updated` | The greatest `updated` over the feed's dated items, compared as
-  instants. If no item has a date: `SOURCE_DATE_EPOCH` when set, otherwise
-  today, as now.
+  instants. If none of this feed's items has a date, the greatest `updated`
+  over the whole site. Only if no page in the site has a date:
+  `SOURCE_DATE_EPOCH` when set, otherwise today, as now.
 | `lang` | Site language _(WP1)_.
 | `authors` | Site author _(WP1)_, else `title` (today's rule).
 | `items` | See <<selection>>.
@@ -161,8 +162,12 @@ Membership:
 | Tag | `/tags/<term>/feed.xml` | `/tags/<term>/rss.xml` | `/tags/<term>/feed.json`
 |===
 
-* *RSS and JSON Feed need a base URL.* Both formats require absolute URLs. Without
-  a base URL the build skips them with a warning. Atom keeps its `urn:` fallback.
+* *RSS and JSON Feed are written only with a base URL.* This is Ddraig's policy,
+  not a requirement of both formats. RSS 2.0's `link` elements must be URLs,
+  and a relative URL is useless to a reader that fetched the feed elsewhere.
+  JSON Feed 1.1 makes its URLs optional, but a feed without them gives readers
+  nothing to link to. Without a base URL the build skips both, with a warning.
+  Atom keeps its `urn:` fallback.
 * JSON Feed is optional: `feeds.json = true` turns it on (default off).
 * Section and tag feeds: `feeds.sections` and `feeds.tags` (default off).
 * If a feed path collides with a content page's output path, the build fails
@@ -184,7 +189,7 @@ changes every page's HTML, so it lands behind a golden test _(WP1 templates)_.
 | `home` | `link rel="alternate"` _(new)_ | `link` | `home_page_url`
 | `self` | `link rel="self"` | `atom:link rel="self"` | `feed_url`
 | `description` | `subtitle` _(new)_ | `description` (required) | `description`
-| `updated` | `updated` | `lastBuildDate` | —
+| `updated` | `updated` | — (see notes) | —
 | `lang` | `xml:lang` _(new)_ | `language` | `language`
 | `authors` | `author/name` | — | `authors[].name`
 | generator | `generator` | `generator` | —
@@ -210,6 +215,12 @@ changes every page's HTML, so it lands behind a golden test _(WP1 templates)_.
 
 Notes:
 
+* RSS has no element for the feed's `updated`. Its `lastBuildDate` means "the
+  last time the content of the channel changed". The newest item date is not
+  that: adding a back-dated page, or editing a page without changing its
+  dates, changes the channel without moving it. The build cannot know the true
+  time deterministically, so `lastBuildDate` (and the channel `pubDate`) are
+  omitted. Both are optional in RSS 2.0.
 * RSS 2.0's own `author` element must hold an e-mail address, so names go in
   Dublin Core `dc:creator` (namespace `http://purl.org/dc/elements/1.1/`).
 * `content:encoded` uses namespace `http://purl.org/rss/1.0/modules/content/` and
@@ -266,7 +277,6 @@ RSS 2.0:
     <title>Example</title>
     <link>https://example.org/</link>
     <description>Example feed</description>
-    <lastBuildDate>Mon, 15 Jan 2024 00:00:00 +0000</lastBuildDate>
     <generator>Ddraig SSG 0.3.0</generator>
     <atom:link href="https://example.org/rss.xml" rel="self" type="application/rss+xml"/>
     <item>
@@ -322,9 +332,9 @@ A consumer may rely on the following.
   matter dates change: not when the site is rebuilt, and not when another page
   changes. An undated item has no `updated` in RSS or JSON Feed. In Atom, which
   requires one, it is the fixed placeholder `1970-01-01T00:00:00Z`; treat that
-  as "unknown". A *feed's* `updated` is the newest item date; only in a site
-  with no dated pages at all does it fall back to the build day (or
-  `SOURCE_DATE_EPOCH`).
+  as "unknown". A *feed's* `updated` is its newest item date, or the site's
+  newest date if none of its items is dated. Only in a site with no dated pages
+  at all does it fall back to the build day (or `SOURCE_DATE_EPOCH`).
 . *Same selection in every format.* For a given scope, the Atom, RSS and JSON
   feeds list the same items in the same order.
 . *Order is a courtesy.* Items are sorted (<<selection>>), but consumers should

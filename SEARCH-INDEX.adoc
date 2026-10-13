@@ -160,9 +160,24 @@ Each `docs` entry is an object with these keys, in this order:
 | `date` | string | Front matter date as normalised by the build. Omitted when absent.
 | `headings` | array | `{"level":n,"text":s,"anchor":a}` per heading, in document
   order. `url + "#" + anchor` deep-links to the heading. Always present, may be empty.
-| `excerpt` | string | The first 160 code points of the body text with runs of
-  whitespace collapsed to one space; `…` appended if cut. Omitted when empty.
+| `excerpt` | string | A short plain-text opening of the body; see <<excerpt>>.
+  Omitted when empty.
 |===
+
+[#excerpt]
+=== Excerpt (normative)
+
+Start from the page's body text: the text of each body block, in document
+order, joined with one U+0020 between blocks. Then, in this order:
+
+. Replace every run of *whitespace* with one U+0020. Whitespace means exactly
+  U+0009, U+000A, U+000C, U+000D, U+0020 and U+00A0; no other code point counts.
+. Remove a leading and a trailing U+0020, if present.
+. If the result is longer than 160 code points, keep the first 160, then remove
+  a trailing U+0020 if one is left, then append U+2026 (`…`). Otherwise keep the
+  result unchanged, with no ellipsis.
+
+An empty result means the key is omitted.
 
 `postings` is an array of `[docId, weight]` pairs sorted by `docId`.
 
