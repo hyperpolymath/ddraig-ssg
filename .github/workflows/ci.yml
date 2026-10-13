@@ -7,6 +7,12 @@ on:
     branches: [main, master]
 permissions:
   contents: read
+# One run per ref: a newer push cancels the older run, so an older build can
+# never reach the deploy job after a newer one. The deploy job's own `pages`
+# group still serialises deployments.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
