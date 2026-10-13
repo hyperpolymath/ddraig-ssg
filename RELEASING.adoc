@@ -1,0 +1,263 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Releasing and verifying Ddraig
+:toc: macro
+
+[WARNING]
+====
+*Status: draft, never run.* The workflow (`.github/workflows/release.yml`) and
+its scripts (`.github/scripts/`) were written on 2026-10-13 on a machine with no
+Linux Idris 2 toolchain, so *none of it has executed*. Facts about the pinned
+toolchain below were checked by reading the container image's manifest and
+layers, not by running the image. Do not push a release tag upstream until the
+<<dry-run>> has passed and been recorded.
+====
+
+toc::[]
+
+== What a release contains
+
+A push of a tag `vX.Y.Z` produces a GitHub release with three files:
+
+[cols="2,3",options="header"]
+|===
+| File | What it is
+| `ddraig-X.Y.Z-x86_64-linux-musl` | Fully static Linux binary for x86_64. No
+  shared libraries, no Chez Scheme, no Idris 2 needed to run it.
+| `ddraig-X.Y.Z-x86_64-linux-musl.sha256` | Its SHA-256 checksum, in the format
+  `sha256sum --check` reads.
+| `ddraig-X.Y.Z-x86_64-linux-musl.sigstore.json` | The signed build provenance
+  attestation, as a Sigstore bundle.
+|===
+
+The attestation is also stored in GitHub's attestation store for the repository.
+
+[#verify]
+== Verifying a release
+
+You need `sha256sum` (coreutils) and a current GitHub CLI (`gh attestation`
+first appeared in 2.49; use a recent release so every flag below exists).
+
+[source,bash]
+----
+V=0.3.0
+B=ddraig-$V-x86_64-linux-musl
+gh release download v$V --repo hyperpolymath/ddraig-ssg --pattern "$B*"
+
+# 1. Integrity: the file is the one the release published.
+sha256sum --check --strict $B.sha256
+
+# 2. Provenance: built by this repository's release workflow, from tag v$V,
+#    on a GitHub-hosted runner.
+gh attestation verify $B --repo hyperpolymath/ddraig-ssg \
+  --signer-workflow hyperpolymath/ddraig-ssg/.github/workflows/release.yml \
+  --source-ref refs/tags/v$V --deny-self-hosted-runners
+
+# 2b. The same check against the bundle attached to the release, instead of
+#     the copy in GitHub's attestation store.
+gh attestation verify $B --bundle $B.sigstore.json --repo hyperpolymath/ddraig-ssg \
+  --signer-workflow hyperpolymath/ddraig-ssg/.github/workflows/release.yml \
+  --source-ref refs/tags/v$V --deny-self-hosted-runners
+
+chmod +x $B && ./$B --version
+----
+
+The release workflow runs steps 1, 2 and 2b on its own output before it
+publishes, so the commands above are exercised on every release.
+
+What each check does and does not tell you:
+
+* *The checksum* detects a corrupted or swapped download. It is published
+  alongside the binary, so on its own it does not prove who built it.
+* *The attestation* is signed with a short-lived Sigstore certificate issued to
+  this repository's `release.yml` running for that tag. It binds the binary's
+  SHA-256 digest to the repository, commit, workflow and runner. It shows *where
+  and how* the binary was built. It does not show that the source is free of
+  bugs, and it does not make the build reproducible.
+
+== Toolchain and pinning
+
+=== Minimum Idris 2 version
+
+*Idris 2 0.8.0* (stated in `README.adoc` and `manifest.json`).
+`.github/scripts/check-idris-version.sh` enforces it in the release workflow.
+`ci.yml` does not run that check yet; adding it is a one-line step.
+
+=== How the toolchain is pinned
+
+[cols="1,2,2",options="header"]
+|===
+| Component | Pin | Where
+| Container image | `ghcr.io/stefan-hoeck/idris2-pack@sha256:f0758996a931…7e1ff` | `ci.yml` and `release.yml` (must match)
+| Idris 2 | 0.8.0 at `idris-lang/Idris2@6ca00e72e32849cb35e5c262904e9c3cffc1a9a4` (2026-06-12), installed by pack inside the image | Implied by the image digest. Also `IDRIS2_COMMIT` in `build-static.sh`.
+| Base OS | Ubuntu 24.04 with `gcc`, `make`, `chezscheme`, `libgmp3-dev` and `git` from apt | Implied by the image digest
+| Zig | 0.16.0, tarball SHA-256 `70e49664…3d00` | `ZIG_VERSION`, `ZIG_SHA256` in `build-static.sh`
+| GMP | 6.3.0, tarball SHA-256 `a3c2b802…8898` | `GMP_VERSION`, `GMP_SHA256` in `build-static.sh`
+| Actions | Full commit SHAs, with the tag in a comment | `release.yml`
+| Extra apt tools | `curl`, `xz-utils`, `m4`: *not pinned* | `release.yml`. Build-time only; none is linked into the binary.
+|===
+
+How the image's contents were found (2026-10-13): the image config lists the
+apt packages above and the Ubuntu 24.04 label, and the pack state layer contains
+`install/6ca00e72…/idris2/idris2-0.8.0/`. The image was not run.
+
+`build-static.sh` checks that the image's Idris 2 is the pinned commit, and stops
+the build if any check fails:
+
+. `idris2 --version` contains the first nine characters of `IDRIS2_COMMIT`;
+. pack has exactly one `idris2-<version>` directory under
+  `$PACK_STATE_DIR/install/<IDRIS2_COMMIT>/idris2`;
+. every RefC and C-support header installed there is identical to the same file
+  in the source at that commit.
+
+This was exercised against fake layouts on Windows, not against the real image.
+If pack's build of Idris 2 does not put the commit in the version string, check
+1 fails closed, and the dry-run will show it.
+
+*To change the toolchain:* update the image digest in `ci.yml` and `release.yml`
+together, set `IDRIS2_COMMIT` to the commit the new image contains, run CI, then
+repeat the <<dry-run>>.
+
+== How the static binary is built
+
+=== Decision: RefC backend + `zig cc` + musl
+
+Idris 2's default Chez backend produces a launcher script plus a compiled Chez
+program that needs the Chez Scheme runtime at run time, so it cannot be a single
+static binary. The release therefore uses Idris 2's *RefC* backend, which emits
+C, and compiles that C with *`zig cc`* for `x86_64-linux-musl` with `-static`.
+
+Why this route:
+
+* RefC output is ordinary C, so static linking is ordinary static linking.
+* `zig cc` brings musl, a linker and cross-compilation in one pinned,
+  checksummed download. No second C toolchain or distribution image is needed.
+* It matches the estate's preference for Zig for native code, and later Zig FFI
+  libraries (image decoding for milestone 2, file watching for milestone 7) can
+  be linked into the same static binary.
+
+Alternatives considered:
+
+* *Chez Scheme with embedded boot files.* Keeps the tested backend, but needs
+  Chez itself rebuilt for musl and a custom C entry point. Much more build
+  machinery.
+* *Alpine and `musl-gcc`.* Needs Idris 2 rebuilt on Alpine, from apk packages
+  that are harder to pin.
+
+=== Steps (`.github/scripts/build-static.sh`)
+
+. Download Zig and check its SHA-256.
+. Fetch the Idris 2 source at `IDRIS2_COMMIT` (the git commit is the content
+  pin) and check that it matches the compiler in the image.
+. Download GMP, check its SHA-256, build it static for musl with
+  `--disable-assembly`, and run its own test suite (`make check`). RefC links
+  GMP for `Integer`.
+. Rebuild the Idris 2 C runtimes (`support/c` and `support/refc`) for musl with
+  the same sources and `-O2` as their Makefiles. The copies in the image are
+  built for glibc.
+. Run `idris2 --cg refc Ddraig.idr -o ddraig-refc`. RefC also links a glibc
+  binary with the image's gcc; only its `build/exec/ddraig-refc.c` is used.
+. Compile and link that C file with `zig cc -target x86_64-linux-musl -static -s`.
+. Fail unless `readelf` shows no program interpreter and no needed libraries.
+
+=== Checks before anything is published (`.github/scripts/test-static.sh`)
+
+CI tests the *Chez* build, but the release ships the *RefC* build, so the release
+job compares the two directly:
+
+. Every CI test subcommand, plus `--version` and `validate-state`, must succeed
+  and print *byte-identical* output from both binaries.
+. The `examples/` site, and a fixture site the script writes (adding a nested
+  page, a draft and more Markdown features), must each build to byte-identical
+  output trees.
+. A large page (5,000 short blocks by default) must build without crashing and
+  match.
+. On a tag, `ddraig --version` must equal the tag.
+
+=== Known risks (not verified)
+
+. *Backend divergence.* RefC and Chez differ in their runtimes. The comparison
+  checks above catch differences on the inputs they cover, not on all inputs.
+. *Stack depth.* Chez grows its stack on demand; a C program has a fixed stack
+  (usually 8 MiB on Linux). The Markdown parser recurses once per block and once
+  per inline element, so a large enough page could crash the static binary while
+  the Chez build succeeds. The large-page check guards a realistic size. If it
+  fails, the fix is either to make those loops tail-recursive, or to run the
+  program on a thread with a large stack through a small Zig entry shim.
+. *The C runtimes under musl.* Building `support/c` and `support/refc` with
+  `zig cc` for musl has not been tried. A compile error there stops the build
+  rather than producing a bad binary. One specific risk: `support/c/getline.c`
+  defines `getdelim` and `getline` unconditionally, as musl's libc also does.
+  Static archive resolution probably avoids a clash, but a duplicate-symbol link
+  error is possible.
+. *Zig download source.* `build-static.sh` downloads Zig from `ziglang.org`. The
+  Zig project may prefer automated downloads to come from its community
+  mirrors; this was not checked. The SHA-256 pin makes a mirror equally safe.
+. *Midnight.* The attestation file records the build day. If the two builds in
+  `test-static.sh` straddle 00:00 UTC, the comparison fails; re-run.
+. *Version string.* The tag check assumes `ddraig --version` prints exactly
+  `ddraig X.Y.Z`, which is what `Ddraig.idr` does today.
+. *Estate policy.* This repository rejects, at job set-up, any action not
+  pinned to a full commit SHA, including the inner actions of a composite action
+  (see the note on `upload-pages-artifact` in `ci.yml`). All four actions in
+  `release.yml` are JavaScript actions with no inner actions, so they comply.
+  This is also why the workflow calls `actions/attest` directly:
+  `actions/attest-build-provenance` v4 is a composite wrapper around it.
+  Separately, workflow comments mention an estate-wide
+  `.github/workflows/actions.lock` keyed by workflow path. This repo has no such
+  file and `ci.yml` uses actions, so it does not appear to be enforced here. If
+  it is, `release.yml` needs an entry before it can start. A fork cannot reveal
+  either policy, because organisation and repository settings do not carry over
+  to it.
+
+== Cutting a release
+
+. Set the version in `Ddraig.idr` (`ddraigVersion`), `manifest.json` and the
+  STATE descriptile. Merge through the normal PR process.
+. Tag the merge commit `vX.Y.Z` and push the tag.
+. The workflow builds, tests, attests and verifies. Only then does it publish.
+. Check that the release page has all three files, then run the <<verify>>
+  commands once yourself.
+
+[#dry-run]
+== Fork dry-run
+
+The brief requires the workflow to be tested on a tag in a fork before anyone
+relies on it.
+
+. Fork `hyperpolymath/ddraig-ssg`. In the fork, enable Actions (forks start with
+  workflows disabled).
+. Push this branch to the fork and merge it into the fork's `main`.
+. Optional first pass: run *Release* by hand (`workflow_dispatch`). This builds
+  and tests only.
+. Push the tag `v0.2.0` to the fork. It must match `ddraigVersion`.
+. When the run finishes, run the <<verify>> commands with
+  `--repo <your-user>/ddraig-ssg` and the fork's workflow path.
+. Run *Release* by hand again with `big_blocks` set to 20000, then 50000, then
+  100000. Record the size at which the static binary first fails. (The
+  reference build runs only after the static one succeeds, so its limit is not
+  measured.)
+. Fill in the record below. Then delete the fork's dry-run release and tag:
+  they are public. The dry-run's attestation stays in Sigstore's public
+  transparency log, which cannot be deleted. It names the fork, the workflow
+  and the binary's digest, and nothing secret.
+
+=== Dry-run record
+
+*Not yet run.*
+
+[cols="1,3",options="header"]
+|===
+| Item | Result
+| Date |
+| Fork and run URL |
+| `workflow_dispatch` build and test |
+| Tag run: build job |
+| Tag run: release job |
+| Static checks (`readelf`) |
+| `test-static.sh` results |
+| Large-page limit (static binary) |
+| User verification (steps 1, 2, 2b) |
+| Binary size and SHA-256 |
+| Problems found and fixes |
+|===
