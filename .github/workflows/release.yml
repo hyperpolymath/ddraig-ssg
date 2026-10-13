@@ -1,0 +1,165 @@
+# SPDX-License-Identifier: MPL-2.0
+# SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell (hyperpolymath) <j.d.a.jewell@open.ac.uk>
+#
+# Release: a static x86_64 Linux binary, its SHA-256 checksum, and a signed SLSA
+# build provenance attestation, published as a GitHub release.
+#
+# ⚠ DRAFT — NEVER RUN. Written 2026-10-13 without a Linux toolchain to test it.
+# Do not push a release tag to the upstream repository until the fork dry-run
+# recorded in RELEASING.adoc has passed.
+#
+# Triggers:
+#   push of a tag vX.Y.Z -> build, test, checksum, attest, verify, publish.
+#   workflow_dispatch    -> build and test only; never attests or publishes.
+#
+# Supply chain: actions are pinned to full commit SHAs; the build container is
+# the same digest-pinned image as ci.yml (bump both together); Zig, GMP and the
+# Idris 2 runtime sources are pinned by checksum or commit inside
+# .github/scripts/build-static.sh. Template expressions reach shell code only
+# through env, never by expansion inside run: blocks.
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      big_blocks:
+        description: "Blocks in the large-page check (find the stack limit during a dry-run)"
+        type: number
+        default: 5000
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and test the static binary
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container:
+      # Same digest as ci.yml: Ubuntu 24.04, Idris 2 0.8.0 at
+      # idris-lang/Idris2@6ca00e72 (RELEASING.adoc, "Toolchain and pinning").
+      image: ghcr.io/stefan-hoeck/idris2-pack@sha256:f0758996a931fb35d9ecb1de273c4d59dabe2a09b433afc7e357f65a08b7e1ff
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install build tools
+        # curl and xz fetch and unpack the pinned Zig and GMP tarballs; GMP's
+        # configure needs m4. These come unpinned from Ubuntu 24.04's archive;
+        # none of them ends up inside the binary.
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends ca-certificates curl xz-utils m4
+
+      - name: Check Idris 2 version (minimum 0.8.0)
+        run: sh .github/scripts/check-idris-version.sh 0.8.0
+
+      - name: Build the reference binary (Chez backend, exactly as CI does)
+        run: idris2 Ddraig.idr -o ddraig
+
+      - name: Build the static binary (RefC backend, zig cc, musl)
+        run: sh .github/scripts/build-static.sh
+
+      - name: Test the static binary against the reference
+        env:
+          BIG_BLOCKS: ${{ inputs.big_blocks || 5000 }}
+        run: sh .github/scripts/test-static.sh dist/ddraig build/exec/ddraig
+
+      - name: Check the tag matches the binary's version
+        if: github.ref_type == 'tag'
+        run: |
+          want="ddraig ${GITHUB_REF_NAME#v}"
+          got=$(dist/ddraig --version)
+          if [ "$got" != "$want" ]; then
+            echo "tag $GITHUB_REF_NAME does not match '$got' (ddraigVersion in Ddraig.idr)" >&2
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ddraig-static
+          path: dist/ddraig
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Checksum, attest, verify and publish
+    needs: build
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write      # create the GitHub release
+      id-token: write      # OIDC token for the short-lived Sigstore certificate
+      attestations: write  # store the attestation
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ddraig-static
+          path: dist
+
+      - name: Name the binary and write its checksum
+        id: asset
+        run: |
+          set -eu
+          bin="ddraig-${GITHUB_REF_NAME#v}-x86_64-linux-musl"
+          cd dist
+          mv ddraig "$bin"
+          chmod 0755 "$bin"   # artifact upload drops the executable bit
+          sha256sum "$bin" > "$bin.sha256"
+          cat "$bin.sha256"
+          echo "bin=$bin" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/${{ steps.asset.outputs.bin }}
+
+      - name: Verify exactly as RELEASING.adoc tells users to
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BIN: ${{ steps.asset.outputs.bin }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -eu
+          cd dist
+          cp "$BUNDLE" "$BIN.sigstore.json"
+          sha256sum --check --strict "$BIN.sha256"
+          # Online: the attestation stored on GitHub.
+          gh attestation verify "$BIN" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "$GITHUB_REF" --deny-self-hosted-runners
+          # The bundle attached to the release.
+          gh attestation verify "$BIN" --bundle "$BIN.sigstore.json" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "$GITHUB_REF" --deny-self-hosted-runners
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BIN: ${{ steps.asset.outputs.bin }}
+        run: |
+          set -eu
+          cat > notes.md <<EOF
+          Static x86_64 Linux binary (musl), its SHA-256 checksum, and a signed
+          build provenance attestation. Verify before running:
+
+              sha256sum --check $BIN.sha256
+              gh attestation verify $BIN --repo $GITHUB_REPOSITORY \\
+                --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release.yml \\
+                --source-ref $GITHUB_REF
+
+          Full instructions: RELEASING.adoc at this tag.
+          EOF
+          gh release create "$GITHUB_REF_NAME" --verify-tag \
+            --title "ddraig $GITHUB_REF_NAME" --notes-file notes.md \
+            "dist/$BIN" "dist/$BIN.sha256" "dist/$BIN.sigstore.json"
