@@ -28,6 +28,7 @@ toc::[]
   markup.
 * *Templating* — file-based layouts (`templates/<layout>.html`), partials
   (`{{> name}}` from `templates/partials/`), a `{{toc}}` table of contents,
+  a `{{root}}` path prefix for root-relative links (see `base-url` below),
   and a built-in accessible fallback template.
 * *Assets* — copies `assets/`, `static/`, `css/`, `js/`, `images/`, and
   `public/` (the latter to the site root, so `/.well-known/security.txt`,
@@ -101,6 +102,12 @@ the `sitemap.xml` and Atom `feed.xml` URLs absolute. A sitemap requires
 absolute `<loc>` URLs to be valid, and the feed embeds absolute `<id>`/`<link>`
 values; without a base URL the feed still validates (it falls back to `urn:`
 ids) but the sitemap locations are relative.
+
+If the site is served under a sub-path, include it in `base-url` (for a GitHub
+Pages project site, `https://<user>.github.io/<repo>`). Its path becomes
+`{{root}}` (here `/<repo>`), which the default template puts in front of its
+stylesheet and home links. Write links between your own pages as relative
+paths (`about.html`), not root-relative ones (`/about.html`).
 
 A minimal example site lives in `examples/`:
 

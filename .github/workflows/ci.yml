@@ -7,6 +7,12 @@ on:
     branches: [main, master]
 permissions:
   contents: read
+# One run per ref: a newer push cancels the older run, so an older build can
+# never reach the deploy job after a newer one. The deploy job's own `pages`
+# group still serialises deployments.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -51,9 +57,18 @@ jobs:
       - name: Compile Ddraig
         run: idris2 Ddraig.idr -o ddraig
       - name: Build sample site
-        # base-url makes sitemap.xml/feed.xml absolute (valid). Change if the
-        # site moves to a custom domain.
+        # base-url makes sitemap.xml/feed.xml absolute (valid), and its path
+        # (/ddraig-ssg) prefixes the template's root-relative links. Change if
+        # the site moves to a custom domain.
         run: ./build/exec/ddraig build examples _site https://hyperpolymath.github.io/ddraig-ssg
+      - name: Check sample site
+        # `ddraig build` exits 0 when it finds no Markdown sources, so the
+        # .md -> .adoc rename in #17 built an empty site and still passed.
+        # Fail on that, and on links that would miss the Pages sub-path.
+        run: |
+          test -s _site/index.html
+          test -s _site/about.html
+          grep -q 'href="/ddraig-ssg/assets/style.css"' _site/index.html
       - name: Upload artifact
         # v5 pins its inner actions/upload-artifact to a commit SHA; v3 used the
         # `@v4` tag, which the SHA-pin policy rejects at job set-up. v4+ drops
@@ -63,3 +78,24 @@ jobs:
         with:
           path: _site
           include-hidden-files: true
+  deploy:
+    # Publish the sample site. Pages is set to build from GitHub Actions, so
+    # this job is what puts https://hyperpolymath.github.io/ddraig-ssg online.
+    # Pushes to main only: pull requests build and upload, but never deploy.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write     # create the Pages deployment
+      id-token: write  # OIDC token that deploy-pages exchanges for it
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
