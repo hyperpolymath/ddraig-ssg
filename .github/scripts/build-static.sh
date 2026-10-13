@@ -37,7 +37,9 @@ ROOT=$(pwd)
 WORK="$ROOT/build/static"
 DIST="$ROOT/dist"
 
+# log MESSAGE...: print a build progress message to stdout.
 log() { printf '==> %s\n' "$*"; }
+# die MESSAGE...: print a build error to stderr and exit with status 1.
 die() { printf 'build-static: %s\n' "$*" >&2; exit 1; }
 
 # fetch URL SHA256 DEST: download over HTTPS and refuse anything but the pin.
@@ -85,6 +87,7 @@ if [ ! -x "$zig_dir/zig" ]; then
 fi
 ZIG="$zig_dir/zig"
 "$ZIG" version
+# ccm ARG...: invoke Zig's C compiler for TARGET at -O2, forwarding ARG.
 ccm() { "$ZIG" cc -target "$TARGET" -O2 "$@"; }
 
 # --- Idris 2 runtime sources, at the compiler's commit ------------------------

@@ -29,7 +29,9 @@ ref=$2
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
+# fail MESSAGE...: print a failed check to stderr and exit with status 1.
 fail() { printf 'test-static: FAIL: %s\n' "$*" >&2; exit 1; }
+# pass MESSAGE...: print a successful check to stdout.
 pass() { printf 'test-static: ok: %s\n' "$*"; }
 
 # same_output NAME CMD...: run CMD with each binary; both must succeed and
