@@ -1,0 +1,393 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Ddraig feeds and the feed item model
+:toc: macro
+
+[WARNING]
+====
+*Status: draft, not implemented.* This is the specification for work package 2,
+milestone 5. Only the existing site-wide Atom feed exists today; RSS, JSON Feed,
+section feeds and tag feeds do not. Nothing new here is tested. Sections,
+authors, languages and some front matter keys depend on work package 1 and are
+marked _(WP1)_.
+====
+
+Ddraig writes feeds in three formats from one internal *feed item model*. The
+`superfeedreader` project consumes these feeds, so this document states what a
+consumer may rely on (<<contract>>) as well as how each format is produced.
+
+toc::[]
+
+[#current]
+== What the build does today
+
+This is the behaviour of `genFeed` in `Ddraig.idr` at v0.2.0. It is recorded
+here because milestone 5 must keep Atom output stable, and any change to it must
+show up as a golden-test diff.
+
+* One Atom 1.0 feed at `/feed.xml`.
+* *Entries:* every built (non-draft) page, in the order the source tree was
+  walked. That order comes from the directory listing and is *not sorted*, so it
+  can differ between filesystems.
+* *Feed title and author name:* the first non-empty `brand`/`site` front matter
+  value found, otherwise `Ddraig Site`.
+* *Feed id:* the absolute URL of `/feed.xml` when a base URL is given, otherwise
+  `urn:ddraig:/feed.xml`.
+* *Feed `<updated>`:* the greatest page `date`, compared as strings, converted
+  to RFC 3339. If no page has a date, today's UTC date at `T00:00:00Z`.
+* `<link rel="self">` only when a base URL is given.
+* `<generator>Ddraig SSG 0.2.0</generator>`.
+* *Per entry:* `<title>`; `<id>` (absolute URL or `urn:ddraig:<path>`);
+  `<link href>` (absolute, or site-relative without a base URL); `<updated>`
+  (the page date in RFC 3339, else the feed's `<updated>`); `<summary>` (the
+  description, emitted even when empty).
+* No `<published>`, `<content>`, `<category>`, per-entry `<author>` or `xml:lang`.
+* No limit on the number of entries.
+
+*Test coverage today: none.* The CI test subcommands (`test-markdown`,
+`test-frontmatter`, `test-full`, `test-state`, `test-attest`) never generate a
+feed. The CI `build` job does write one, but `examples/` currently holds only
+`.adoc` files, which the build ignores, so that feed has no entries; it is
+published to Pages without any check. So the first commit of milestone 5 must
+add a golden test of the current Atom output for a fixture with a deterministic
+walk order (a single directory level, or a single page), before anything else
+changes. The golden file normalises the `<generator>` line, which carries the
+version number.
+
+Known defects in the current feed, to be fixed only with a golden diff:
+
+. `rfc3339` appends `T00:00:00Z` to any date without a `T` and passes any date
+  with a `T` through unchecked. So `2024-01-15T10:00` (no zone) and
+  `15 Jan 2024` both produce invalid timestamps.
+. Front matter values keep their quotes, so `date: "2024-01-15"` becomes
+  `"2024-01-15"T00:00:00Z`.
+. `<updated>` values are not XML-escaped, so a `&` or `<` in a date breaks the
+  feed.
+. The "latest date" is a string comparison, which is wrong once dates carry
+  different UTC offsets.
+. Entry order is unspecified (see above).
+. An undated entry takes the feed's `<updated>`. It therefore looks like the
+  newest entry, and it changes whenever another page's date changes.
+. `<summary>` is emitted even when empty, which says "this entry has an empty
+  summary" rather than "no summary".
+. Characters that XML 1.0 forbids (U+0000–U+0008, U+000B, U+000C,
+  U+000E–U+001F) are not removed, so a stray control character in a title makes
+  the whole feed invalid.
+. With no dated pages, the output depends on the day the build runs.
+
+[#model]
+== The feed item model
+
+Every feed format is a rendering of the same two records. Field names below are
+the model's; <<mapping>> shows where each one goes in each format.
+
+=== FeedItem
+
+[cols="1,1,3",options="header"]
+|===
+| Field | Type | Source and rules
+| `id` | IRI | The absolute permalink when a base URL is set, otherwise
+  `urn:ddraig:<path>`. A pure function of base URL and output path (the same rule
+  as today's Atom `<id>`).
+| `url` | URL | Absolute permalink. Site-relative only in Atom without a base URL.
+| `title` | text | Front matter `title`; falls back to the source path, as today.
+| `published` | timestamp? | Front matter `date`.
+| `updated` | timestamp? | Front matter `updated` _(WP1: new key)_, else `published`.
+| `summary` | text? | Front matter `description`.
+| `content` | HTML? | The rendered page body. Only when `feeds.full_content` is on.
+| `authors` | list of author | Front matter `author`, else the site author _(WP1)_.
+| `tags` | list of tag | Front matter `tags`. A tag has a `label` (as written) and a
+  `term` (its `slugify` form).
+| `section` | name? | The page's section _(WP1)_.
+| `lang` | language tag? | The page's language _(WP1)_.
+|===
+
+=== Feed
+
+[cols="1,3",options="header"]
+|===
+| Field | Rules
+| `id` | Absolute URL of the feed file, else `urn:ddraig:<feed path>` (Atom only).
+| `title` | Site title _(WP1 config)_, else the current `brand` rule. Section and tag
+  feeds append ` — <section>` or ` — #<tag label>`.
+| `home` | Absolute URL of the site root (or the section or tag page).
+| `self` | Absolute URL of this feed file.
+| `description` | Site description _(WP1)_, else `<title> feed`.
+| `updated` | The greatest `updated` over the feed's dated items, compared as
+  instants. If no item has a date: `SOURCE_DATE_EPOCH` when set, otherwise
+  today, as now.
+| `lang` | Site language _(WP1)_.
+| `authors` | Site author _(WP1)_, else `title` (today's rule).
+| `items` | See <<selection>>.
+|===
+
+=== Timestamps
+
+Accepted front matter forms _(WP1 may widen this)_:
+
+* `YYYY-MM-DD` means midnight UTC on that day;
+* `YYYY-MM-DDTHH:MM:SSZ`;
+* `YYYY-MM-DDTHH:MM:SS+HH:MM` or `-HH:MM`.
+
+Anything else is a build error with file, line and column (milestone 8), not a
+pass-through. Atom and JSON Feed use RFC 3339. RSS uses the RFC 822 date form
+with a four-digit year and a numeric zone, e.g. `Mon, 15 Jan 2024 00:00:00 +0000`.
+The weekday is computed from days since 1970-01-01, which was a Thursday.
+
+[#selection]
+== Which pages, in which order
+
+. *Candidates:* every built content page. Drafts are never built. Alias pages,
+  the 404 page, listing pages and machine views are not candidates.
+. *Undated pages:* included in site-wide feeds when `feeds.include_undated` is
+  true. The default is `true`, because that is what today's Atom feed does.
+. *Order:* `updated` descending, then `id` ascending. Undated items sort last.
+. *Limit:* `feeds.limit` (default: unlimited, as today) applies after ordering.
+
+Membership:
+
+* *Site feeds:* all selected pages.
+* *Section feeds:* pages in that section _(WP1)_.
+* *Tag feeds:* pages carrying the tag. Tags whose `term` collides (e.g. `Rust`
+  and `rust`) are merged into one feed with a build warning; the first label in
+  sorted order is used.
+
+== Files
+
+[cols="2,1,1,1",options="header"]
+|===
+| Scope | Atom | RSS 2.0 | JSON Feed 1.1
+| Site | `/feed.xml` (exists) | `/rss.xml` | `/feed.json`
+| Section | `/<section>/feed.xml` | `/<section>/rss.xml` | `/<section>/feed.json`
+| Tag | `/tags/<term>/feed.xml` | `/tags/<term>/rss.xml` | `/tags/<term>/feed.json`
+|===
+
+* *RSS and JSON Feed need a base URL.* Both formats require absolute URLs. Without
+  a base URL the build skips them with a warning. Atom keeps its `urn:` fallback.
+* JSON Feed is optional: `feeds.json = true` turns it on (default off).
+* Section and tag feeds: `feeds.sections` and `feeds.tags` (default off).
+* If a feed path collides with a content page's output path, the build fails
+  (milestone 8 diagnostics).
+
+Pages advertise their feeds with `<link rel="alternate">` in `<head>`. This
+changes every page's HTML, so it lands behind a golden test _(WP1 templates)_.
+
+[#mapping]
+== Format mapping
+
+=== Feed level
+
+[cols="1,2,2,2",options="header"]
+|===
+| Model | Atom | RSS 2.0 (`channel`) | JSON Feed 1.1
+| `id` | `id` | — | —
+| `title` | `title` | `title` | `title`
+| `home` | `link rel="alternate"` _(new)_ | `link` | `home_page_url`
+| `self` | `link rel="self"` | `atom:link rel="self"` | `feed_url`
+| `description` | `subtitle` _(new)_ | `description` (required) | `description`
+| `updated` | `updated` | `lastBuildDate` | —
+| `lang` | `xml:lang` _(new)_ | `language` | `language`
+| `authors` | `author/name` | — | `authors[].name`
+| generator | `generator` | `generator` | —
+| version | — | `rss version="2.0"` | `version` = `https://jsonfeed.org/version/1.1`
+|===
+
+=== Item level
+
+[cols="1,2,2,2",options="header"]
+|===
+| Model | Atom `entry` | RSS 2.0 `item` | JSON Feed `items[]`
+| `id` | `id` | `guid`; `isPermaLink="true"` (always absolute here) | `id`
+| `url` | `link href` | `link` | `url`
+| `title` | `title` | `title` | `title`
+| `published` | `published` _(new)_ | `pubDate` | `date_published`
+| `updated` | `updated` (required; undated items get `1970-01-01T00:00:00Z` _(changed)_) | — | `date_modified`
+| `summary` | `summary`, omitted when there is none _(changed)_ | `description` (plain text, escaped) | `summary`
+| `content` | `content type="html"` | `content:encoded` | `content_html`
+| `authors` | `author/name` | `dc:creator` | `authors[].name`
+| `tags` | `category term="<term>" label="<label>"` _(new)_ | `category` (label) | `tags` (labels)
+| `lang` | `xml:lang` | — | `language`
+|===
+
+Notes:
+
+* RSS 2.0's own `author` element must hold an e-mail address, so names go in
+  Dublin Core `dc:creator` (namespace `http://purl.org/dc/elements/1.1/`).
+* `content:encoded` uses namespace `http://purl.org/rss/1.0/modules/content/` and
+  holds entity-escaped HTML, not CDATA, so no `]]>` splitting is needed.
+* JSON Feed 1.1 requires `content_html` or `content_text` on every item. With
+  `full_content` off, `content_text` is the summary, or the title when there is
+  no summary.
+* Elements marked _(new)_ or _(changed)_ change Atom output. Each lands behind a
+  golden-test diff. New elements go *after* the existing ones to keep that diff
+  small.
+* *Why undated Atom entries get the epoch:* Atom requires `<updated>`. Today's
+  fallback (the feed's `<updated>`) makes an undated page look like the newest
+  entry, and moves it whenever another page's date changes. A fixed epoch is
+  stable, sorts undated entries last for consumers that sort by date themselves,
+  and is plainly a placeholder. RSS and JSON Feed simply omit the date.
+
+=== Examples
+
+Site at `https://example.org` with no site description or language configured,
+and one dated, tagged page. Atom as milestone 5 would emit it, with the new
+elements placed after the existing ones:
+
+[source,xml]
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Example</title>
+  <id>https://example.org/feed.xml</id>
+  <updated>2024-01-15T00:00:00Z</updated>
+  <author><name>Example</name></author>
+  <link rel="self" href="https://example.org/feed.xml"/>
+  <generator>Ddraig SSG 0.3.0</generator>
+  <link rel="alternate" href="https://example.org/"/>
+  <subtitle>Example feed</subtitle>
+  <entry>
+    <title>Hello</title>
+    <id>https://example.org/blog/hello.html</id>
+    <link href="https://example.org/blog/hello.html"/>
+    <updated>2024-01-15T00:00:00Z</updated>
+    <summary>First post</summary>
+    <published>2024-01-15T00:00:00Z</published>
+    <category term="idris" label="Idris"/>
+  </entry>
+</feed>
+----
+
+RSS 2.0:
+
+[source,xml]
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Example</title>
+    <link>https://example.org/</link>
+    <description>Example feed</description>
+    <lastBuildDate>Mon, 15 Jan 2024 00:00:00 +0000</lastBuildDate>
+    <generator>Ddraig SSG 0.3.0</generator>
+    <atom:link href="https://example.org/rss.xml" rel="self" type="application/rss+xml"/>
+    <item>
+      <title>Hello</title>
+      <link>https://example.org/blog/hello.html</link>
+      <guid isPermaLink="true">https://example.org/blog/hello.html</guid>
+      <pubDate>Mon, 15 Jan 2024 00:00:00 +0000</pubDate>
+      <description>First post</description>
+      <category>Idris</category>
+    </item>
+  </channel>
+</rss>
+----
+
+JSON Feed 1.1 (indented here; the file has no whitespace):
+
+[source,json]
+----
+{
+  "version": "https://jsonfeed.org/version/1.1",
+  "title": "Example",
+  "home_page_url": "https://example.org/",
+  "feed_url": "https://example.org/feed.json",
+  "description": "Example feed",
+  "authors": [{"name": "Example"}],
+  "items": [
+    {
+      "id": "https://example.org/blog/hello.html",
+      "url": "https://example.org/blog/hello.html",
+      "title": "Hello",
+      "content_text": "First post",
+      "summary": "First post",
+      "date_published": "2024-01-15T00:00:00Z",
+      "date_modified": "2024-01-15T00:00:00Z",
+      "tags": ["Idris"]
+    }
+  ]
+}
+----
+
+[#contract]
+== Consumer contract (for superfeedreader)
+
+A consumer may rely on the following.
+
+. *Stable ids.* An item's id depends only on the base URL and the page's output
+  path. Editing the title, date, tags or body never changes it. Moving a page
+  changes it, and the moved page is a new item. Aliases _(WP1)_ never create items.
+. *One id everywhere.* A page has the same id in every feed that contains it and
+  in every format: Atom `id` = RSS `guid` = JSON Feed `id`. Deduplicate across
+  site, section and tag feeds by id.
+. *Honest `updated`.* An item's `updated` changes only when its own front
+  matter dates change: not when the site is rebuilt, and not when another page
+  changes. An undated item has no `updated` in RSS or JSON Feed. In Atom, which
+  requires one, it is the fixed placeholder `1970-01-01T00:00:00Z`; treat that
+  as "unknown". A *feed's* `updated` is the newest item date; only in a site
+  with no dated pages at all does it fall back to the build day (or
+  `SOURCE_DATE_EPOCH`).
+. *Same selection in every format.* For a given scope, the Atom, RSS and JSON
+  feeds list the same items in the same order.
+. *Order is a courtesy.* Items are sorted (<<selection>>), but consumers should
+  sort by date themselves.
+. *Limits apply after sorting*, so a limited feed holds the newest items.
+. *Missing optional fields mean "unknown".* An absent summary is not an empty
+  summary. (Today's Atom feed emits an empty `<summary>` for pages with no
+  description. Milestone 5 omits it, as an intended golden-test diff.)
+. *Changes are versioned here.* Any change to ids, selection or mapping is
+  listed in the changelog at the end of this document before it ships.
+
+== Escaping
+
+* *XML:* `&`, `<`, `>` and `"` are escaped as today (`strEscape`). Characters
+  that XML 1.0 forbids are replaced with U+FFFD.
+* *JSON:* the escaping rules in `SEARCH-INDEX.adoc` ("JSON encoding").
+
+== Validation (milestone 5)
+
+The brief allows recorded reference fixtures or an external validator in CI.
+Decision: *recorded fixtures plus structural checks with C tools*, because the
+W3C Feed Validator is written in Python, and Python is banned in this estate's
+builds.
+
+* *Golden fixtures:* the exact expected feeds for a fixture site, committed and
+  compared byte for byte.
+* *Atom:* `xmllint --noout --relaxng atom.rng` against the RELAX NG schema from
+  RFC 4287, appendix B. The RFC gives the compact syntax; the XML-syntax copy is
+  committed once and its provenance recorded beside it.
+* *RSS 2.0:* there is no normative schema. `xmllint` checks that it is well
+  formed, and `xmllint --xpath` checks that the required channel and item
+  elements are present.
+* *JSON Feed:* `jq` assertions on the required keys and on `content_html` or
+  `content_text` being present on every item.
+* *Optional, one-off:* submit the committed fixtures to the W3C validator by
+  hand and record the result here. This is not run in CI.
+
+Neither tool adds Node, npm or Python. CI's test job runs inside the
+idris2-pack container, which has neither, so the job installs them first
+(`apt-get install --yes libxml2-utils jq`).
+
+== Planned tests
+
+* Golden test of today's Atom output, added *first*.
+* Atom stays byte-identical for that fixture (with the `<generator>` version
+  normalised), except for diffs this document marks _(new)_ or _(changed)_.
+* An undated page's Atom `<updated>` does not move when another page's date
+  changes.
+* RSS and JSON golden files; schema and structure checks as above.
+* The same ids appear in every format and scope.
+* Drafts never appear. Undated pages follow `feeds.include_undated`.
+* RSS and JSON are skipped, with a warning, when there is no base URL.
+* Tag and section membership for a fixture with overlapping tags.
+* `SOURCE_DATE_EPOCH` makes an all-undated site's feeds reproducible.
+
+== Open questions for WP1
+
+* What a section is (top-level directory, or declared in config).
+* The author model (site author and per-page authors).
+* Per-language feeds: probably `/<lang>/feed.xml` and so on, one per language.
+* Whether `updated` becomes a front matter key.
+
+== Changelog
+
+* *Draft 1*: initial model. Atom output unchanged until the golden test lands.
