@@ -27,4 +27,4 @@ main : IO ()
 main = putStrLn "Ddraig"
 ```
 
-See the [getting-started page](/about.html) and the project [README](https://github.com/hyperpolymath/ddraig-ssg).
+See the [getting-started page](about.html) and the project [README](https://github.com/hyperpolymath/ddraig-ssg).

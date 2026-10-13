@@ -536,7 +536,9 @@ buildToc hs =
 -- Canonical AAA default template (WCAG 2.2 AAA-capable engine-owned surface):
 -- skip link, <html lang>, labelled landmarks, main#main, viewport, stylesheet
 -- link. Placeholders: {{title}} {{brand}} {{description}} {{date}} {{toc}}
--- {{content}} — content substituted LAST so its body HTML is never reprocessed.
+-- {{root}} {{content}} — content substituted LAST so its body HTML is never
+-- reprocessed. {{root}} is the site's path prefix (see `basePath`), so the
+-- root-relative stylesheet and home links also work under a sub-path.
 defTemplate : String
 defTemplate = """
 <!DOCTYPE html>
@@ -556,16 +558,16 @@ defTemplate = """
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="{{title}}">
   <meta name="twitter:description" content="{{description}}">
-  <link rel="stylesheet" href="/assets/style.css">
+  <link rel="stylesheet" href="{{root}}/assets/style.css">
 </head>
 <body typeof="schema:WebPage">
   <a class="skip-link" href="#main">Skip to content</a>
 
   <header class="site-header" role="banner">
     <nav class="container nav" aria-label="Primary" role="navigation" typeof="schema:SiteNavigationElement">
-      <a class="brand" href="/" property="schema:url"><span property="schema:name">{{brand}}</span></a>
+      <a class="brand" href="{{root}}/" property="schema:url"><span property="schema:name">{{brand}}</span></a>
       <ul class="nav-links">
-        <li><a href="/" property="schema:url">Home</a></li>
+        <li><a href="{{root}}/" property="schema:url">Home</a></li>
       </ul>
     </nav>
   </header>
@@ -748,15 +750,16 @@ stripPlaceholders s = pack (go (unpack s))
       else c :: go rest
 
 export
-applyTemplate : String -> Frontmatter -> (canonical : String) -> String -> String -> String
-applyTemplate template fm canonical htmlContent tocHtml =
+applyTemplate : String -> Frontmatter -> (root : String) -> (canonical : String) -> String -> String -> String
+applyTemplate template fm root canonical htmlContent tocHtml =
   let brand = if fm.brand == "" then fm.title else fm.brand
       t1 = strReplace template "{{title}}" (strEscape fm.title)
       t2 = strReplace t1 "{{date}}" (strEscape fm.date)
       t3 = strReplace t2 "{{description}}" (strEscape fm.description)
       t4 = strReplace t3 "{{brand}}" (strEscape brand)
       tc = strReplace t4 "{{canonical}}" (strEscape canonical)
-      t5 = strReplace tc "{{toc}}" tocHtml
+      tr = strReplace tc "{{root}}" (strEscape root)
+      t5 = strReplace tr "{{toc}}" tocHtml
       -- strip any remaining unfilled placeholders BEFORE injecting content,
       -- so author content (which may legitimately contain braces) is untouched
       t6 = stripPlaceholders t5
@@ -917,6 +920,27 @@ absUrl base path =
   if base == "" then path
   else (if strHasSuffix "/" base then substr 0 (length base `minus` 1) base else base) ++ path
 
+-- The site's path prefix: the path part of the base URL without a trailing
+-- slash. "https://example.org/docs/" gives "/docs"; a site at the domain root,
+-- or no base URL, gives "". Templates use it as {{root}} for root-relative
+-- links, so a project site served under a sub-path (GitHub Pages serves
+-- /<repo>/) still finds its stylesheet and home page.
+basePath : (base : String) -> String
+basePath base = pack (reverse (dropSlashes (reverse (pathOf (afterScheme (unpack base))))))
+  where
+    afterScheme : List Char -> List Char
+    afterScheme (':' :: '/' :: '/' :: rest) = rest
+    afterScheme (_ :: rest) = afterScheme rest
+    afterScheme [] = []
+    -- drop the host, keeping everything from the first '/'
+    pathOf : List Char -> List Char
+    pathOf [] = []
+    pathOf cs@('/' :: _) = cs
+    pathOf (_ :: rest) = pathOf rest
+    dropSlashes : List Char -> List Char
+    dropSlashes ('/' :: rest) = dropSlashes rest
+    dropSlashes cs = cs
+
 -- Build one markdown file. Returns Maybe Page (Nothing if draft skipped).
 -- Build one markdown file. Returns the Page plus its O3 certification status
 -- (certified?, violations). Nothing only when the file is a draft or unreadable.
@@ -938,7 +962,7 @@ buildOne src out base rel = do
            let fm2 = { title := title } fm
            let relHtml = toHtmlPath rel
            let canonical = absUrl base ("/" ++ relHtml)
-           let html = applyTemplate tpl fm2 canonical md.body toc
+           let html = applyTemplate tpl fm2 (basePath base) canonical md.body toc
            let outPath = joinPath out relHtml
            _ <- mkDirP (dirOf outPath)
            w <- writeFile outPath html
@@ -1224,8 +1248,19 @@ testFull = do
   let content = "---\ntitle: Welcome\ndate: 2024-01-15\n---\n\n# Welcome\n\nThis is **Ddraig**, an Idris 2-powered SSG.\n\n- Dependently typed\n- Provably correct\n"
   let (fm, body) = parseFrontmatter content
   let md = parseMarkdownFull body
-  let output = applyTemplate defTemplate fm "/welcome.html" md.body (buildToc md.toc)
+  let output = applyTemplate defTemplate fm "" "/welcome.html" md.body (buildToc md.toc)
   putStrLn output
+  -- {{root}}: a sub-path site's links must carry its prefix.
+  let cases = [ ("", ""), ("https://example.com", ""), ("https://example.com/", "")
+              , ("https://hyperpolymath.github.io/ddraig-ssg", "/ddraig-ssg")
+              , ("https://example.org/a/b/", "/a/b") ]
+  let wrong = filter (\(b, want) => basePath b /= want) cases
+  let rooted = applyTemplate defTemplate fm "/sub" "/sub/welcome.html" md.body ""
+  let styled = strReplace rooted "href=\"/sub/assets/style.css\"" "" /= rooted
+  if null wrong && styled
+     then putStrLn "OK: basePath and {{root}}"
+     else do putStrLn ("FAIL: basePath/{{root}} " ++ show wrong ++ " stylesheet-prefixed=" ++ show styled)
+             exitFailure
 
 -- ============================================================================
 -- a2ml STATE descriptile validation (O1)
