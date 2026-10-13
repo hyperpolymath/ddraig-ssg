@@ -42,7 +42,9 @@ log() { printf '==> %s\n' "$*"; }
 # die MESSAGE...: print a build error to stderr and exit with status 1.
 die() { printf 'build-static: %s\n' "$*" >&2; exit 1; }
 
-# fetch URL SHA256 DEST: download over HTTPS and refuse anything but the pin.
+# fetch URL SHA256 DEST: download over HTTPS to DEST and verify its SHA-256.
+# Overwrites DEST; leaves it in place on checksum failure. Download or checksum
+# failures terminate the script with the failing command's exit status.
 fetch() {
   curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
        --output "$3" "$1"
@@ -53,6 +55,9 @@ fetch() {
 #   1. the idris2 on PATH reports the pinned commit in its version string;
 #   2. pack has that commit installed;
 #   3. every RefC and C-support header it installed equals the source's.
+# Uses SRC as the source tree and PACK_STATE_DIR as pack's state directory.
+# Missing pack state or a version, layout or header mismatch exits the script
+# with status 1; idris2 --version failures propagate their exit status.
 check_idris() {
   short=$(printf '%s' "$IDRIS2_COMMIT" | cut -c1-9)
   version=$(idris2 --version)
