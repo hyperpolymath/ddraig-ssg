@@ -1,0 +1,294 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Ddraig search index format (version 1)
+:toc: macro
+
+[WARNING]
+====
+*Status: draft, not implemented.* This is the specification for work package 2,
+milestone 4. No code emits this file yet and nothing here is tested. Config key
+names, page fields and per-language paths are *provisional* until work package 1
+(site config, content model, i18n) is merged; they are marked _(WP1)_ below.
+====
+
+Ddraig can write a static JSON search index that a page can load and query
+without a JavaScript search framework. This document fixes the file's format so
+that clients written against it keep working across releases.
+
+toc::[]
+
+== Goals and non-goals
+
+* *Static.* One JSON file per language, generated at build time. No server.
+* *No framework.* The index is shaped so that a short hand-written script can
+  answer queries: terms are pre-tokenised, pre-weighted and sorted.
+* *Deterministic.* The same sources and config produce a byte-identical file.
+  There is no timestamp in it. Milestone 6 (incremental builds) relies on this.
+* *Bounded.* A configurable size limit is enforced by a documented, deterministic
+  truncation rule. Pages are never dropped silently.
+* *Not a goal:* stemming, fuzzy matching, phrase search or ranking beyond summed
+  field weights. Clients may add these on top.
+
+== Enabling it
+
+The index is *off by default*, so existing sites gain no new file unless they ask
+for one.
+
+[source,toml]
+----
+[search]                 # (WP1) final config syntax follows the WP1 config module
+enabled    = true        # default false
+max_bytes  = 1048576     # default 1 MiB; hard limit on the serialised file
+stop_words = "builtin"   # "builtin" (English), "none", or a list of words
+----
+
+A page opts out with front matter `search: false` _(WP1: new key)_.
+
+== Location
+
+* Default language: `/search-index.json` at the site root.
+* Other languages: `/<lang>/search-index.json` _(WP1: follows the i18n URL
+  scheme)_. Each language has its own stop-word list and its own index.
+
+Served as `application/json`. Encoded as UTF-8 with no byte-order mark.
+
+== What is indexed
+
+A *searchable page* is any built content page except:
+
+* drafts (they are never built);
+* pages with `search: false`;
+* generated pages that are not content: alias redirects, the 404 page, listing
+  and taxonomy pages _(WP1)_, machine views (milestone 9).
+
+From each searchable page the indexer takes four *fields*:
+
+[cols="1,3",options="header"]
+|===
+| Field | Source
+| `title` | Front matter `title` (falls back to the source path, as the build does today).
+| `description` | Front matter `description`.
+| `headings` | The text of every heading, `h1` to `h6`, in document order.
+| `body` | The text of every other block, taken from the typed `Html` tree (not
+  by stripping tags from rendered HTML). Image alt text is included.
+  Fenced code blocks and raw-HTML passthrough blocks are excluded.
+|===
+
+== Tokenisation (normative)
+
+Clients must tokenise queries with exactly these rules, or exact-term lookups
+will miss.
+
+. *Case.* ASCII `A`–`Z` are lowered to `a`–`z`. Nothing else is changed. No
+  Unicode case folding or normalisation is applied, because the result must not
+  depend on the Idris 2 backend's character tables.
+. *Separators.* A token is a maximal run of characters that are not separators.
+  Separators are:
+  ** every code point below U+0080 except `0`–`9`, `A`–`Z` and `a`–`z`;
+  ** U+0080–U+00BF, U+00D7 and U+00F7 (Latin-1 controls, punctuation and signs);
+  ** U+2000–U+206F (General Punctuation, including curly quotes and dashes);
+  ** U+2E00–U+2E7F (Supplemental Punctuation);
+  ** U+3000–U+303F (CJK Symbols and Punctuation).
+. *Length.* Tokens of a single ASCII character are dropped. Tokens longer than
+  64 code points are dropped.
+. *Stop words.* Tokens in the stop-word list are dropped, after step 1.
+
+Consequences worth knowing:
+
+* `don't` yields `don`; the lone `t` is dropped.
+* Digits are kept, so `2024` is searchable. `0.8.0` is not: it splits into
+  single digits, which are dropped.
+* Scripts written without spaces (Chinese, Japanese) become one long token per
+  run, which makes them effectively unsearchable in version 1.
+
+=== Built-in English stop words
+
+The built-in list is the classic 33-word English set used by Lucene's
+`StopAnalyzer`, chosen because it is small, well known and removes no
+content words:
+
+`a an and are as at be but by for if in into is it no not of on or such that the
+their then there these they this to was will with`
+
+There is no built-in list for other languages; set `stop_words` per language
+_(WP1)_. The list in force is written into the index so clients can apply it to
+queries.
+
+== Weights
+
+Each (term, page) pair gets one integer weight:
+
+----
+weight = 8 × (occurrences in title)
+       + 4 × (occurrences in headings)
+       + 2 × (occurrences in description)
+       + 1 × (occurrences in body)
+----
+
+The field weights are fixed for format version 1 and recorded in the file.
+
+== File structure
+
+The top-level value is an object with these keys, *in this order*:
+
+[cols="1,1,3",options="header"]
+|===
+| Key | Type | Meaning
+| `format` | string | Always `"ddraig-search"`.
+| `version` | integer | Format version. This document describes `1`.
+| `generator` | string | `"Ddraig SSG <version>"`.
+| `lang` | string | Language of this index, e.g. `"en"` _(WP1)_.
+| `weights` | object | `{"title":8,"headings":4,"description":2,"body":1}`.
+| `stop_words` | array of string | The stop-word list applied, sorted.
+| `limits` | object | See <<limits>>.
+| `docs` | array of object | One entry per searchable page, sorted by `url`
+  (code-point order). A page's *doc id* is its index in this array.
+| `terms` | array of `[string, postings]` | Every indexed term with its
+  postings, sorted by term (code-point order). Sorted pairs rather than an object
+  so that a client can binary-search for a prefix.
+|===
+
+Each `docs` entry is an object with these keys, in this order:
+
+[cols="1,1,3",options="header"]
+|===
+| Key | Type | Meaning
+| `url` | string | The page's site-relative URL, the build's `Page.url` (e.g.
+  `/blog/post.html`). Never absolute, so the index works whatever the base URL.
+| `title` | string | Page title.
+| `description` | string | Omitted when empty.
+| `date` | string | Front matter date as normalised by the build. Omitted when absent.
+| `headings` | array | `{"level":n,"text":s,"anchor":a}` per heading, in document
+  order. `url + "#" + anchor` deep-links to the heading. Always present, may be empty.
+| `excerpt` | string | The first 160 code points of the body text with runs of
+  whitespace collapsed to one space; `…` appended if cut. Omitted when empty.
+|===
+
+`postings` is an array of `[docId, weight]` pairs sorted by `docId`.
+
+=== JSON encoding
+
+* No insignificant whitespace.
+* Strings escape `"` as `\"`, `\` as `\\`, newline as `\n`, carriage return as
+  `\r`, tab as `\t`, and every other code point below U+0020 as `\u00XX` with
+  lower-case hex. Nothing else is escaped: non-ASCII is written as UTF-8 and `/`
+  is not escaped.
+
+[NOTE]
+====
+The existing `jsonEsc` in `Ddraig.idr` escapes only `"`, `\` and newline, so a
+tab or carriage return in a title would produce invalid JSON. The search index
+needs a complete escaper. If the attestation file is switched to it too, its
+output changes for inputs containing those characters, and that change needs a
+golden test.
+====
+
+[#limits]
+== Size limit (normative)
+
+The `limits` object is `{"max_bytes":n,"body_tokens":k,"excerpts":b}`.
+
+. Build the full index. If its serialised size is at most `max_bytes`, write it
+  with `body_tokens` = `null` and `excerpts` = `true`.
+. Otherwise index only the first `k` body tokens of each page (in document order,
+  counted after stop-word removal), choosing the largest `k` for which the file
+  fits. `k` is found by binary search, so the result is deterministic. Write
+  `body_tokens` = `k`.
+. If the file does not fit even with `k` = 0, drop every `excerpt`, set
+  `excerpts` = `false`, and repeat the search for `k` from scratch. (Dropping
+  the excerpts frees space, so some body tokens may fit again.)
+. If it still does not fit, the build fails. The error states the size of each
+  field across all pages and suggests raising `max_bytes` or excluding pages with
+  `search: false`.
+
+Titles, descriptions and headings are never truncated.
+
+== Example
+
+A two-page site. Real output has no whitespace; it is shown indented here.
+
+[source,json]
+----
+{
+  "format": "ddraig-search",
+  "version": 1,
+  "generator": "Ddraig SSG 0.3.0",
+  "lang": "en",
+  "weights": {"title": 8, "headings": 4, "description": 2, "body": 1},
+  "stop_words": ["a", "an", "and", "are", "as", "at", "be", "but", "by", "for",
+    "if", "in", "into", "is", "it", "no", "not", "of", "on", "or", "such",
+    "that", "the", "their", "then", "there", "these", "they", "this", "to",
+    "was", "will", "with"],
+  "limits": {"max_bytes": 1048576, "body_tokens": null, "excerpts": true},
+  "docs": [
+    {"url": "/blog/feeds.html", "title": "Feeds", "date": "2026-01-15",
+     "headings": [{"level": 1, "text": "Feeds", "anchor": "feeds"},
+                  {"level": 2, "text": "Atom and RSS", "anchor": "atom-and-rss"}],
+     "excerpt": "Ddraig writes Atom."},
+    {"url": "/index.html", "title": "Ddraig",
+     "description": "A dependently typed generator",
+     "headings": [{"level": 1, "text": "Ddraig", "anchor": "ddraig"}],
+     "excerpt": "Types that breathe fire."}
+  ],
+  "terms": [
+    ["atom",        [[0, 5]]],
+    ["breathe",     [[1, 1]]],
+    ["ddraig",      [[0, 1], [1, 12]]],
+    ["dependently", [[1, 2]]],
+    ["feeds",       [[0, 12]]],
+    ["fire",        [[1, 1]]],
+    ["generator",   [[1, 2]]],
+    ["rss",         [[0, 4]]],
+    ["typed",       [[1, 2]]],
+    ["types",       [[1, 1]]],
+    ["writes",      [[0, 1]]]
+  ]
+}
+----
+
+`atom` scores 5 on the feeds page: 4 for the heading "Atom and RSS" plus 1 for
+the body. `ddraig` scores 12 on the home page: 8 for the title plus 4 for its
+`h1`.
+
+== Querying (non-normative)
+
+A client can answer a query in a few lines:
+
+. Tokenise the query with the rules above and drop stop words.
+. For each query token, find the term exactly, or every term with that prefix
+  (binary search on the sorted `terms`).
+. Sum weights per doc id. For an AND query, keep only docs that matched every
+  token.
+. Sort by total weight descending, then doc id ascending. Show `title`, `url`
+  and `excerpt` from `docs`; use `headings` to link straight to a section.
+
+== Stability policy
+
+* `version` increases whenever tokenisation, weights, structure, or the meaning
+  of an existing key changes.
+* Within a version, new *optional* keys may be added. Clients must ignore keys
+  they do not know.
+* Ddraig emits only the current version. Each change is listed below.
+
+== Planned tests (milestone 4)
+
+* Golden index for a fixture site, compared byte for byte.
+* Drafts and `search: false` pages are absent.
+* Stop words are absent from `terms`; the list in the file matches config.
+* Size limit: a fixture over the limit produces the documented `body_tokens`
+  value, twice in a row, byte-identically; a fixture that cannot fit fails with
+  the documented message.
+* JSON escaping: a title containing a tab and a quote round-trips through a
+  strict parser.
+
+== Open questions
+
+* _(WP1)_ Exact page fields, the i18n URL scheme and config syntax.
+* Whether listing pages should be searchable. Version 1 says no.
+* Whether to index fenced code. Version 1 says no; a `search.include_code`
+  option could be added later without a format change, because it only changes
+  which text is fed in.
+
+== Changelog
+
+* *Version 1* (draft): initial format.
