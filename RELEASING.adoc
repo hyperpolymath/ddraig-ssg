@@ -167,8 +167,9 @@ job compares the two directly:
 
 . Every CI test subcommand, plus `--version` and `validate-state`, must succeed
   and print *byte-identical* output from both binaries.
-. A fixture site (written by the script, because `examples/` currently holds no
-  buildable pages) must build to byte-identical output trees.
+. The `examples/` site, and a fixture site the script writes (adding a nested
+  page, a draft and more Markdown features), must each build to byte-identical
+  output trees.
 . A large page (5,000 short blocks by default) must build without crashing and
   match.
 . On a tag, `ddraig --version` must equal the tag.
@@ -196,11 +197,18 @@ job compares the two directly:
   `test-static.sh` straddle 00:00 UTC, the comparison fails; re-run.
 . *Version string.* The tag check assumes `ddraig --version` prints exactly
   `ddraig X.Y.Z`, which is what `Ddraig.idr` does today.
-. *Estate policy.* Workflow comments in this repo mention an estate-wide
+. *Estate policy.* This repository rejects, at job set-up, any action not
+  pinned to a full commit SHA, including the inner actions of a composite action
+  (see the note on `upload-pages-artifact` in `ci.yml`). All four actions in
+  `release.yml` are JavaScript actions with no inner actions, so they comply.
+  This is also why the workflow calls `actions/attest` directly:
+  `actions/attest-build-provenance` v4 is a composite wrapper around it.
+  Separately, workflow comments mention an estate-wide
   `.github/workflows/actions.lock` keyed by workflow path. This repo has no such
   file and `ci.yml` uses actions, so it does not appear to be enforced here. If
   it is, `release.yml` needs an entry before it can start. A fork cannot reveal
-  this, because organisation policies do not apply to it.
+  either policy, because organisation and repository settings do not carry over
+  to it.
 
 == Cutting a release
 

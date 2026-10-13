@@ -46,9 +46,8 @@ show up as a golden-test diff.
 
 *Test coverage today: none.* The CI test subcommands (`test-markdown`,
 `test-frontmatter`, `test-full`, `test-state`, `test-attest`) never generate a
-feed. The CI `build` job does write one, but `examples/` currently holds only
-`.adoc` files, which the build ignores, so that feed has no entries; it is
-published to Pages without any check. So the first commit of milestone 5 must
+feed. The CI `build` job does write one, from `examples/`, and publishes it to
+GitHub Pages without any check. So the first commit of milestone 5 must
 add a golden test of the current Atom output for a fixture with a deterministic
 walk order (a single directory level, or a single page), before anything else
 changes. The golden file normalises the `<generator>` line, which carries the

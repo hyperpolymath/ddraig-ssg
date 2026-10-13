@@ -7,7 +7,7 @@
 #
 #   1. every CI test subcommand passes and prints exactly what the reference prints;
 #   2. validate-state accepts this repo's STATE descriptile;
-#   3. building a fixture site gives byte-identical output trees;
+#   3. building examples/ and a fixture site gives byte-identical output trees;
 #   4. a large page builds without crashing (C stack depth; see RELEASING.adoc)
 #      and also matches the reference.
 #
@@ -15,8 +15,8 @@
 #
 # DRAFT: not yet run. See RELEASING.adoc.
 #
-# The fixture lives here rather than in examples/ because examples/ currently
-# holds .adoc files, which the build ignores, so it builds no pages.
+# Run from the repository root. The fixture site written below adds what
+# examples/ lacks: a nested page, a draft, and more Markdown constructs.
 #
 # Known false alarm: the attestation file records the build day, so if the two
 # builds straddle 00:00 UTC their output trees differ. Re-run.
@@ -68,7 +68,8 @@ for t in test-markdown test-frontmatter test-full test-state test-attest; do
 done
 same_output validate-state validate-state .machine_readable/descriptiles/STATE.a2ml
 
-# --- 3: fixture site -----------------------------------------------------------
+# --- 3: examples/ and a fixture site -------------------------------------------
+same_site examples examples
 # Every page has exactly one h1 and no skipped heading levels, or the build's
 # accessibility certification (O3) fails it.
 site="$work/site"
