@@ -9,6 +9,8 @@ what `ddraig` produces:
 * `examples/`: the site built from `examples/` with base URL
   `https://hyperpolymath.github.io/ddraig-ssg` and the build date pinned by
   `SOURCE_DATE_EPOCH`.
+* `errors/<case>.stdout`, `.stderr`, `.status`: what a user sees for each
+  deliberately broken command in `tests/golden.sh` (see DIAGNOSTICS.adoc).
 
 These files are generated. Do not edit them by hand. When a change to `ddraig`
 changes its output on purpose, regenerate them with

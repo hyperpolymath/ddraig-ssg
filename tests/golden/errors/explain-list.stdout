@@ -1,0 +1,5 @@
+DDR0001  SOURCE_DATE_EPOCH is not a whole number of seconds
+DDR0002  the source directory does not exist, or is not a directory
+DDR0003  the first argument is not a ddraig command
+DDR0004  a command was given the wrong number of arguments
+DDR0005  `ddraig explain` was given an identifier that is not a diagnostic code

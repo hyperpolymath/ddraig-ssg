@@ -1,0 +1,4 @@
+error[DDR0002]: "page.md" is a file; `ddraig build` needs the directory of source pages
+  = help: give the directory that contains your pages instead
+
+ddraig: build stopped: 1 error

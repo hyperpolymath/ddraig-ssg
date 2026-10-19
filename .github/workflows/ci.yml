@@ -32,6 +32,8 @@ jobs:
         run: idris2 --check State.idr
       - name: Type-check accessibility attestation (proof O3 - echo types)
         run: idris2 --check Attest.idr
+      - name: Type-check diagnostics (total; every code has an explanation)
+        run: idris2 --check Diagnostic.idr
       - name: Test Markdown
         run: ./build/exec/ddraig test-markdown
       - name: Test Frontmatter
@@ -42,6 +44,8 @@ jobs:
         run: ./build/exec/ddraig test-state
       - name: Test a11y attestation (certifies accessible, rejects inaccessible)
         run: ./build/exec/ddraig test-attest
+      - name: Test diagnostics (unique codes, suggestions)
+        run: ./build/exec/ddraig test-diagnostics
       - name: Validate this repo's STATE descriptile (a2ml O1)
         run: ./build/exec/ddraig validate-state .machine_readable/descriptiles/STATE.a2ml
       - name: Golden tests (output byte-identical to tests/golden/)

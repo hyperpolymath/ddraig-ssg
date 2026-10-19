@@ -18,6 +18,7 @@ import System.File
 import Html
 import State
 import Attest
+import Diagnostic
 
 %default covering
 
@@ -1068,33 +1069,39 @@ civilFromDays days =
 -- The build's "now" in seconds since the Unix epoch. SOURCE_DATE_EPOCH
 -- (https://reproducible-builds.org/specs/source-date-epoch/), when set and
 -- non-empty, replaces the clock, so a build and its golden tests do not depend
--- on the day they run. A value that is not a non-negative integer stops the
--- build rather than being silently ignored.
-buildEpochSeconds : HasIO io => io Integer
+-- on the day they run. A value that is not a non-negative integer is reported
+-- (DDR0001) rather than silently ignored.
+buildEpochSeconds : HasIO io => io (Either Diagnostic Integer)
 buildEpochSeconds = do
   env <- getEnv "SOURCE_DATE_EPOCH"
   case env of
     Just s =>
-      if s == "" then clock
+      if s == "" then map Right clock
       else case (all isDigit (unpack s), parsePositive s) of
-             (True, Just n) => pure n
-             _ => do putStrLn ("ERROR: SOURCE_DATE_EPOCH must be a non-negative integer, got: " ++ s)
-                     exitFailure
-    Nothing => clock
+             (True, Just n) => pure (Right n)
+             _ => pure (Left (badEpoch s))
+    Nothing => map Right clock
   where
     clock : io Integer
     clock = do c <- liftIO (clockTime UTC); pure (seconds c)
+    badEpoch : String -> Diagnostic
+    badEpoch s =
+      withHelp "unset it, or set it to the empty string, to use today's date" $
+      withHelp "use whole seconds since 1970-01-01 UTC, digits only: SOURCE_DATE_EPOCH=1782086400" $
+      diagError BadSourceDateEpoch
+        ("SOURCE_DATE_EPOCH must be a whole number of seconds, but it is \"" ++ s ++ "\"")
 
 -- The build date as "YYYY-MM-DD": the attestation's "generated" date and the
--- feed <updated> fallback when no page carries a date.
-currentUtcDate : HasIO io => io String
-currentUtcDate = do
-  secs <- buildEpochSeconds
-  let (y, m, d) = civilFromDays (secs `div` 86400)
-  pure (show y ++ "-" ++ pad2 m ++ "-" ++ pad2 d)
+-- feed <updated> fallback when no page carries a date. Read once per build,
+-- so the two always agree.
+currentUtcDate : HasIO io => io (Either Diagnostic String)
+currentUtcDate = map (map toDate) buildEpochSeconds
   where
     pad2 : Integer -> String
     pad2 n = if n < 10 then "0" ++ show n else show n
+    toDate : Integer -> String
+    toDate secs = let (y, m, d) = civilFromDays (secs `div` 86400)
+                  in show y ++ "-" ++ pad2 m ++ "-" ++ pad2 d
 
 -- sitemap.xml (locs are absolute when a base URL is supplied)
 genSitemap : HasIO io => (base : String) -> (out : String) -> List Page -> io ()
@@ -1115,9 +1122,8 @@ genSitemap base out pages = do
 -- feed.xml (Atom). Emits every RFC 4287-required element: feed
 -- id/title/updated/author and per-entry id/title/updated. Ids and links are
 -- absolute when a base URL is supplied, urn: ids otherwise.
-genFeed : HasIO io => (base : String) -> (out : String) -> List Page -> io ()
-genFeed base out pages = do
-  now <- currentUtcDate
+genFeed : HasIO io => (base : String) -> (out : String) -> (now : String) -> List Page -> io ()
+genFeed base out now pages = do
   let dated = filter (/= "") (map (\pg => pg.fm.date) pages)
   let feedUpdated = rfc3339 (case dated of
                                [] => now
@@ -1189,13 +1195,56 @@ writeAttestation base out now results = do
         ++ concat (intersperse ", " (map (\v => "\"" ++ jsonEsc v ++ "\"") viols))
         ++ "]}"
 
--- Full build command.
+-- ----------------------------------------------------------------------------
+-- Reporting problems (format and codes: Diagnostic.idr, DIAGNOSTICS.adoc)
+-- ----------------------------------------------------------------------------
+
+-- Print diagnostics on stderr, quoting the source line of any that point into
+-- a readable file.
+report : HasIO io => List Diagnostic -> io ()
+report ds = do
+  srcs <- traverse load (nub (mapMaybe diagFile ds))
+  ignore (fPutStr stderr (renderAll (\f => join (lookup f srcs)) ds))
+  where
+    load : String -> io (String, Maybe String)
+    load f = do r <- readFile f; pure (f, either (const Nothing) Just r)
+
+-- Report problems that stop a build, and exit with status 1.
+failBuild : HasIO io => List Diagnostic -> io a
+failBuild ds = do
+  report ds
+  ignore (fPutStrLn stderr ("\nddraig: build stopped: " ++ summary ds))
+  exitWith (ExitFailure 1)
+
+-- Report a mistake on the command line, and exit with status 2.
+failUsage : HasIO io => List Diagnostic -> io a
+failUsage ds = do report ds; exitWith (ExitFailure 2)
+
+-- The source directory must exist and be a directory (DDR0002).
+checkSourceDir : HasIO io => String -> io (List Diagnostic)
+checkSourceDir src = do
+  dir <- isDir src
+  if dir then pure [] else do
+    file <- fileExists src
+    pure [ if file
+             then withHelp "give the directory that contains your pages instead" $
+                  diagError SourceDirMissing
+                    ("\"" ++ src ++ "\" is a file; `ddraig build` needs the directory of source pages")
+             else withHelp "check the spelling; a relative path starts from the directory ddraig runs in" $
+                  diagError SourceDirMissing ("source directory \"" ++ src ++ "\" does not exist") ]
+
+-- Full build command. Everything that can be checked before writing output is
+-- checked first, and all of it is reported together.
 buildSite : HasIO io => (src : String) -> (out : String) -> (base : String) -> io ()
 buildSite src out base = do
   putStrLn ("Ddraig build: " ++ src ++ " -> " ++ out)
-  ok <- isDir src
-  if not ok
-     then putStrLn ("ERROR: source dir not found: " ++ src)
+  srcProblems <- checkSourceDir src
+  today <- currentUtcDate
+  case today of
+    Left d => failBuild (srcProblems ++ [d])
+    Right now =>
+     if not (null srcProblems)
+     then failBuild srcProblems
      else do
        _ <- mkDirP out
        all <- walkFiles src ""
@@ -1208,8 +1257,7 @@ buildSite src out base = do
        writeDefaultStyle src out
        copyPublic src out
        genSitemap base out pages
-       genFeed base out pages
-       now <- currentUtcDate
+       genFeed base out now pages
        writeAttestation base out now results
        putStrLn ("Done. " ++ show (length pages) ++ " page(s) built.")
        let failed = filter (\(_, c, _) => not c) results
@@ -1334,9 +1382,128 @@ testAttest = do
                   traverse_ (\v => putStrLn ("  - " ++ v)) vs
     Right _ => do putStrLn "FAIL: inaccessible document certified"; exitFailure
 
+-- Rendering samples and invariants for the diagnostics core. The rendered
+-- text is pinned by tests/golden/cli/test-diagnostics.out; the invariants
+-- (unique, round-tripping codes; the expected suggestions) fail the test.
+testDiagnostics : IO ()
+testDiagnostics = do
+  putStrLn "=== Test: diagnostics ==="
+  let ids = map codeId allCodes
+  let unique = length (nub ids) == length ids
+  let roundTrip = all (\c => map codeId (fromId (codeId c)) == Just (codeId c)) allCodes
+  putStrLn ("codes: " ++ show (length ids) ++ ", unique: " ++ show unique
+            ++ ", round-trip: " ++ show roundTrip)
+  let cases = the (List (String, List String, Maybe String))
+                [ ("titel",  ["title", "date", "tags"], Just "title")    -- transposed letters
+                , ("Title",  ["title", "date"],         Just "title")    -- case only
+                , ("biuld",  ["build", "clean", "explain"], Just "build")
+                , ("DDR002", ids,                       Just "DDR0002")  -- a missing digit
+                , ("xyz",    ["title", "date"],         Nothing)         -- nothing close
+                , ("title",  ["title"],                 Nothing) ]       -- identical: no typo
+  traverse_ (\(w, _, e) => putStrLn ("closest " ++ show w ++ ": " ++ show e)) cases
+  let wrong = filter (\(w, k, e) => closest w k /= e) cases
+  putStrLn ""
+  putStr (renderAll sourceOf samples)
+  putStrLn ""
+  putStrLn ("summary: " ++ summary samples)
+  if unique && roundTrip && null wrong
+     then putStrLn "OK: diagnostics"
+     else do putStrLn ("FAIL: diagnostics; wrong suggestions for " ++ show (map fst wrong))
+             exitFailure
+  where
+    toml : String
+    toml = "[site]\ntitle = \"Example\"\ntitel = \"Typo\"\n"
+    long : String
+    long = concat (Data.List.replicate 10 "filler = 1\n") ++ "\tvalue = [1, 2\n"
+    gappy : String
+    gappy = "first\n\nthird\n"
+    sourceOf : String -> Maybe String
+    sourceOf "sample/site.toml"  = Just toml
+    sourceOf "sample/long.toml"  = Just long
+    sourceOf "sample/gappy.md"   = Just gappy
+    sourceOf _                   = Nothing
+    samples : List Diagnostic
+    samples =
+      [ withNote "this is a rendering sample, not a real message" $
+        withHelp "did you mean \"title\"?" $
+        atPos "sample/site.toml" 3 1 5 "not a known key" $
+        diagError UnknownCommand "sample: located error with a label, help and a note"
+      , withHelp "a two-digit line number widens the gutter; the tab shows as one space" $
+        atPos "sample/long.toml" 11 10 5 "this list is never closed" $
+        diagWarning WrongArguments "sample: warning on line 11"
+      , atPos "sample/site.toml" 2 18 3 "one caret just past the end, e.g. for something missing" $
+        diagError WrongArguments "sample: span past the end of the line"
+      , atPos "sample/gappy.md" 2 1 1 "" $
+        diagError WrongArguments "sample: an empty source line"
+      , withHelp "the file could not be read, so no line is quoted" $
+        atPos "sample/unreadable.md" 4 2 1 "unseen" $
+        diagError SourceDirMissing "sample: located in a file that cannot be read"
+      , inFile "sample/whole-file.md" $
+        diagError SourceDirMissing "sample: a whole file"
+      , withHelp "no file at all, as for a command-line mistake" $
+        diagError UnknownCode "sample: no location"
+      ]
+
 -- ============================================================================
 -- Main
 -- ============================================================================
+
+-- A command, as `ddraig --help` and the command-line errors describe it.
+record Command where
+  constructor MkCommand
+  cmdName : String
+  cmdArgs : String   -- e.g. "<src> <out> [base-url]"
+  minArgs : Nat
+  maxArgs : Nat
+
+commands : List Command
+commands =
+  [ MkCommand "build"          "<src> <out> [base-url]" 2 3
+  , MkCommand "clean"          "<out>"                  1 1
+  , MkCommand "validate-state" "<file.a2ml>"            1 1
+  , MkCommand "explain"        "[code]"                 0 1
+  , MkCommand "--help"         ""                       0 0
+  , MkCommand "--version"      ""                       0 0 ]
+
+-- Everything accepted as a first argument, for "did you mean ...?".
+commandNames : List String
+commandNames =
+  map cmdName commands
+    ++ ["help", "-h", "-v", "test-markdown", "test-frontmatter", "test-full",
+        "test-state", "test-attest", "test-diagnostics"]
+
+-- The command line matched no command: either an unknown command (DDR0003)
+-- or a known one with the wrong number of arguments (DDR0004).
+badInvocation : String -> List String -> Diagnostic
+badInvocation cmd rest =
+  case filter (\c => c.cmdName == cmd) commands of
+    (c :: _) =>
+      withHelp ("usage: " ++ synopsis c) $
+      diagError WrongArguments
+        ("`ddraig " ++ cmd ++ "` takes " ++ takes c.minArgs c.maxArgs
+         ++ ", but was given " ++ show (length rest))
+    [] =>
+      withHelp "run `ddraig --help` to list the commands" $
+      withHelps (didYouMean cmd commandNames) $
+      diagError UnknownCommand ("unknown command \"" ++ cmd ++ "\"")
+  where
+    synopsis : Command -> String
+    synopsis c = "ddraig " ++ c.cmdName ++ (if c.cmdArgs == "" then "" else " " ++ c.cmdArgs)
+    takes : Nat -> Nat -> String
+    takes 0 0 = "no arguments"
+    takes 1 1 = "1 argument"
+    takes lo hi = if lo == hi then show lo ++ " arguments"
+                  else show lo ++ " or " ++ show hi ++ " arguments"
+
+-- `ddraig explain <code>`: the code may be given in either case.
+explainCode : String -> IO ()
+explainCode c =
+  case fromId (toUpper (trim c)) of
+    Just code => putStr (renderExplanation code)
+    Nothing =>
+      failUsage [ withHelp "run `ddraig explain` with no code to list every code" $
+                  withHelps (didYouMean (toUpper (trim c)) (map codeId allCodes)) $
+                  diagError UnknownCode ("\"" ++ c ++ "\" is not a diagnostic code") ]
 
 usage : IO ()
 usage = do
@@ -1350,11 +1517,18 @@ usage = do
   putStrLn "        build date, so the same sources always give the same output"
   putStrLn "  ddraig clean <out>         Remove built files under <out>"
   putStrLn "  ddraig validate-state <file.a2ml>  Validate an a2ml STATE descriptile"
+  putStrLn "  ddraig explain [code]      Explain a diagnostic code such as DDR0002;"
+  putStrLn "                             with no code, list them all"
   putStrLn "  ddraig --version           Print version"
   putStrLn "  ddraig --help              This help"
   putStrLn ""
+  putStrLn "Problems are reported on stderr as error[DDRnnnn] with the file, line and"
+  putStrLn "column where known. Exit status: 0 success, 1 the build found problems,"
+  putStrLn "2 the command line was wrong."
+  putStrLn ""
   putStrLn "Test subcommands:"
   putStrLn "  ddraig test-markdown | test-frontmatter | test-full | test-state | test-attest"
+  putStrLn "  ddraig test-diagnostics"
 
 main : IO ()
 main = do
@@ -1365,6 +1539,7 @@ main = do
     [_, "test-full"] => testFull
     [_, "test-state"] => testState
     [_, "test-attest"] => testAttest
+    [_, "test-diagnostics"] => testDiagnostics
     [_, "--version"] => putStrLn ("ddraig " ++ ddraigVersion)
     [_, "-v"] => putStrLn ("ddraig " ++ ddraigVersion)
     [_, "--help"] => usage
@@ -1374,4 +1549,7 @@ main = do
     [_, "build", src, out, base] => buildSite src out base
     [_, "clean", out] => cleanOut out
     [_, "validate-state", path] => validateStateFile path
+    [_, "explain"] => putStr renderCodeList
+    [_, "explain", code] => explainCode code
+    (_ :: cmd :: rest) => failUsage [badInvocation cmd rest]
     _ => usage

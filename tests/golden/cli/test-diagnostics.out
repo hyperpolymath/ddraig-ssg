@@ -1,0 +1,50 @@
+=== Test: diagnostics ===
+codes: 5, unique: True, round-trip: True
+closest "titel": Just "title"
+closest "Title": Just "title"
+closest "biuld": Just "build"
+closest "DDR002": Just "DDR0002"
+closest "xyz": Nothing
+closest "title": Nothing
+
+error[DDR0005]: sample: no location
+  = help: no file at all, as for a command-line mistake
+
+error[DDR0004]: sample: an empty source line
+ --> sample/gappy.md:2:1
+  |
+2 |
+  | ^
+
+warning[DDR0004]: sample: warning on line 11
+  --> sample/long.toml:11:10
+   |
+11 |  value = [1, 2
+   |          ^^^^^ this list is never closed
+   |
+   = help: a two-digit line number widens the gutter; the tab shows as one space
+
+error[DDR0004]: sample: span past the end of the line
+ --> sample/site.toml:2:18
+  |
+2 | title = "Example"
+  |                  ^ one caret just past the end, e.g. for something missing
+
+error[DDR0003]: sample: located error with a label, help and a note
+ --> sample/site.toml:3:1
+  |
+3 | titel = "Typo"
+  | ^^^^^ not a known key
+  |
+  = help: did you mean "title"?
+  = note: this is a rendering sample, not a real message
+
+error[DDR0002]: sample: located in a file that cannot be read
+ --> sample/unreadable.md:4:2
+  = help: the file could not be read, so no line is quoted
+
+error[DDR0002]: sample: a whole file
+ --> sample/whole-file.md
+
+summary: 6 errors and 1 warning
+OK: diagnostics

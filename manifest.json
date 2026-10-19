@@ -41,6 +41,7 @@
   "usage": {
     "build": "ddraig build <src> <out> [base-url]",
     "clean": "ddraig clean <out>",
+    "explain": "ddraig explain [code]",
     "version": "ddraig --version"
   },
   "test": {
@@ -50,6 +51,7 @@
       "./build/exec/ddraig test-full",
       "./build/exec/ddraig test-state",
       "./build/exec/ddraig test-attest",
+      "./build/exec/ddraig test-diagnostics",
       "./build/exec/ddraig validate-state .machine_readable/descriptiles/STATE.a2ml",
       "sh tests/golden.sh"
     ]

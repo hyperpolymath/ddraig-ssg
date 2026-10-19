@@ -1,0 +1,3 @@
+error[DDR0003]: unknown command "biuld"
+  = help: did you mean "build"?
+  = help: run `ddraig --help` to list the commands

@@ -1,0 +1,4 @@
+error[DDR0002]: source directory "no-such-dir" does not exist
+  = help: check the spelling; a relative path starts from the directory ddraig runs in
+
+ddraig: build stopped: 1 error

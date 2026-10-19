@@ -87,9 +87,17 @@ Requires `idris2 >= 0.8.0`.
 ddraig build <src-dir> <out-dir> [base-url]   # build a site
 ddraig clean <out-dir>                         # remove an output dir
 ddraig validate-state <file.a2ml>              # validate an a2ml STATE descriptile
+ddraig explain [code]                          # explain a diagnostic code, or list them
 ddraig --version
 ddraig --help
 ----
+
+When something is wrong, ddraig reports it on stderr with a code, the file,
+line and column where known, and how to fix it, for example
+`error[DDR0003]: unknown command "biuld"` followed by
+`= help: did you mean "build"?`. `ddraig explain DDR0003` explains any code.
+Exit status is 0 on success, 1 when the build finds problems, and 2 when the
+command line is wrong. See link:DIAGNOSTICS.adoc[DIAGNOSTICS.adoc].
 
 `validate-state` runs the *total* `validateState` decision (`State.idr`) over a
 TOML-like a2ml STATE descriptile, reporting every schema violation (missing
@@ -138,15 +146,17 @@ src/
 
 [source,bash]
 ----
-./build/exec/ddraig test-state       # also test-markdown, -frontmatter, -full, -attest
+./build/exec/ddraig test-state       # also -markdown, -frontmatter, -full, -attest, -diagnostics
 sh tests/golden.sh                   # compare output with tests/golden/
 sh tests/golden.sh --update          # after an intended output change; review the diff
 ----
 
 `tests/golden.sh` compares, byte for byte, the output of each `test-*`
-subcommand and the site built from `examples/` with the expected output in
-`tests/golden/`. A change to `ddraig`'s output therefore shows up as a diff of
-those files, committed with the change that caused it.
+subcommand, the site built from `examples/`, and what a user sees for each
+deliberately broken command (stdout, stderr and exit status) with the expected
+output in `tests/golden/`. A change to `ddraig`'s output or to any of its
+messages therefore shows up as a diff of those files, committed with the
+change that caused it.
 
 The tests pin the build date with `SOURCE_DATE_EPOCH`
 (https://reproducible-builds.org/specs/source-date-epoch/[spec]). When that
