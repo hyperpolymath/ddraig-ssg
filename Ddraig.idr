@@ -814,15 +814,18 @@ dirOf path =
                  [] => ""
                  _  => foldr (\a, b => if b == "" then a else a ++ "/" ++ b) "" xs
 
--- Recursively gather all files under `root` matching predicate, returning
--- paths relative to `root`.
+-- Recursively gather all files under `root`, returning paths relative to
+-- `root`. Each directory's entries are sorted first: listDir returns them in
+-- the filesystem's own order (hash order on ext4, and different again on
+-- another machine), and the sitemap, feed and attestation list pages in walk
+-- order, so sorting is what makes the output the same everywhere.
 walkFiles : HasIO io => (root : String) -> (rel : String) -> io (List String)
 walkFiles root rel = do
   let dir = joinPath root rel
   r <- listDir dir
   case r of
     Left _ => pure []
-    Right entries => concatMap' entries
+    Right entries => concatMap' (sort entries)
   where
     concatMap' : List String -> io (List String)
     concatMap' [] = pure []

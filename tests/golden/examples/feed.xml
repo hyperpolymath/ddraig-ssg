@@ -7,17 +7,17 @@
   <link rel="self" href="https://hyperpolymath.github.io/ddraig-ssg/feed.xml"/>
   <generator>Ddraig SSG 0.2.0</generator>
   <entry>
-    <title>Ddraig</title>
-    <id>https://hyperpolymath.github.io/ddraig-ssg/index.html</id>
-    <link href="https://hyperpolymath.github.io/ddraig-ssg/index.html"/>
-    <updated>2026-06-22T00:00:00Z</updated>
-    <summary>A dependently-typed static-site generator written in Idris 2.</summary>
-  </entry>
-  <entry>
     <title>Getting started</title>
     <id>https://hyperpolymath.github.io/ddraig-ssg/about.html</id>
     <link href="https://hyperpolymath.github.io/ddraig-ssg/about.html"/>
     <updated>2026-06-22T00:00:00Z</updated>
     <summary>How to build a site with Ddraig.</summary>
+  </entry>
+  <entry>
+    <title>Ddraig</title>
+    <id>https://hyperpolymath.github.io/ddraig-ssg/index.html</id>
+    <link href="https://hyperpolymath.github.io/ddraig-ssg/index.html"/>
+    <updated>2026-06-22T00:00:00Z</updated>
+    <summary>A dependently-typed static-site generator written in Idris 2.</summary>
   </entry>
 </feed>
