@@ -52,3 +52,8 @@ Containerfile  text eol=lf
 # Lock files
 Cargo.lock  text eol=lf -diff
 flake.lock  text eol=lf -diff
+
+# Golden outputs (tests/golden.sh): byte-exact copies of ddraig's output.
+# No end-of-line conversion and no whitespace checks, because trailing spaces
+# and blank lines at end of file are part of the expected output.
+tests/golden/**  -text -whitespace

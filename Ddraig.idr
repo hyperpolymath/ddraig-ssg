@@ -1062,12 +1062,32 @@ civilFromDays days =
       m   = if mp < 10 then mp + 3 else mp - 9
   in (if m <= 2 then y + 1 else y, m, d)
 
--- Current UTC date as "YYYY-MM-DD" (the feed <updated> fallback when no page
--- carries a date).
+-- The build's "now" in seconds since the Unix epoch. SOURCE_DATE_EPOCH
+-- (https://reproducible-builds.org/specs/source-date-epoch/), when set and
+-- non-empty, replaces the clock, so a build and its golden tests do not depend
+-- on the day they run. A value that is not a non-negative integer stops the
+-- build rather than being silently ignored.
+buildEpochSeconds : HasIO io => io Integer
+buildEpochSeconds = do
+  env <- getEnv "SOURCE_DATE_EPOCH"
+  case env of
+    Just s =>
+      if s == "" then clock
+      else case (all isDigit (unpack s), parsePositive s) of
+             (True, Just n) => pure n
+             _ => do putStrLn ("ERROR: SOURCE_DATE_EPOCH must be a non-negative integer, got: " ++ s)
+                     exitFailure
+    Nothing => clock
+  where
+    clock : io Integer
+    clock = do c <- liftIO (clockTime UTC); pure (seconds c)
+
+-- The build date as "YYYY-MM-DD": the attestation's "generated" date and the
+-- feed <updated> fallback when no page carries a date.
 currentUtcDate : HasIO io => io String
 currentUtcDate = do
-  c <- liftIO (clockTime UTC)
-  let (y, m, d) = civilFromDays (seconds c `div` 86400)
+  secs <- buildEpochSeconds
+  let (y, m, d) = civilFromDays (secs `div` 86400)
   pure (show y ++ "-" ++ pad2 m ++ "-" ++ pad2 d)
   where
     pad2 : Integer -> String
@@ -1323,6 +1343,8 @@ usage = do
   putStrLn "  ddraig build <src> <out> [base-url]  Build a site"
   putStrLn "        base-url (e.g. https://example.com) makes sitemap.xml and"
   putStrLn "        feed.xml URLs absolute (recommended; required for a valid sitemap)"
+  putStrLn "        SOURCE_DATE_EPOCH (seconds since 1970-01-01 UTC), if set, fixes the"
+  putStrLn "        build date, so the same sources always give the same output"
   putStrLn "  ddraig clean <out>         Remove built files under <out>"
   putStrLn "  ddraig validate-state <file.a2ml>  Validate an a2ml STATE descriptile"
   putStrLn "  ddraig --version           Print version"

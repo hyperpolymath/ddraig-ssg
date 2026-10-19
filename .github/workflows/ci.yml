@@ -44,6 +44,10 @@ jobs:
         run: ./build/exec/ddraig test-attest
       - name: Validate this repo's STATE descriptile (a2ml O1)
         run: ./build/exec/ddraig validate-state .machine_readable/descriptiles/STATE.a2ml
+      - name: Golden tests (output byte-identical to tests/golden/)
+        # Any change to ddraig's output must arrive with its diff to
+        # tests/golden/; regenerate with `sh tests/golden.sh --update`.
+        run: sh tests/golden.sh
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15

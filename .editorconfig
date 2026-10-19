@@ -17,6 +17,11 @@ trim_trailing_whitespace = false
 [*.adoc]
 trim_trailing_whitespace = false
 
+# Golden outputs must match ddraig's output byte for byte (tests/golden.sh).
+[tests/golden/**]
+trim_trailing_whitespace = false
+insert_final_newline = unset
+
 [*.rs]
 indent_size = 4
 

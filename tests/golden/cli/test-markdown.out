@@ -1,0 +1,10 @@
+=== Test: Markdown ===
+<h1 id="hello-world">Hello World</h1>
+<p>This is a <strong>bold</strong> test with <em>italic</em> and <del>strike</del> text.</p>
+<ul><li>Item 1</li><li>Item 2</li></ul>
+<blockquote><p>a quote</p></blockquote>
+<table><thead><tr><th scope="col">a</th><th scope="col">b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>
+<p><a href="https://x">link</a> and <img src="y.png" alt="img" /></p>
+<pre><code class="language-idris">foo : Int
+</code></pre>
+

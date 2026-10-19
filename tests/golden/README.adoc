@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Golden outputs
+
+Expected output for `tests/golden.sh`, which compares it byte for byte with
+what `ddraig` produces:
+
+* `cli/<subcommand>.out`: standard output of each `test-*` subcommand.
+* `examples/`: the site built from `examples/` with base URL
+  `https://hyperpolymath.github.io/ddraig-ssg` and the build date pinned by
+  `SOURCE_DATE_EPOCH`.
+
+These files are generated. Do not edit them by hand. When a change to `ddraig`
+changes its output on purpose, regenerate them with
+`sh tests/golden.sh --update` and commit the resulting diff with that change, so
+every output change is reviewed.
+
+They carry no SPDX headers because they must match `ddraig`'s output exactly.
+They are output of MPL-2.0 code and are covered by this repository's licence.

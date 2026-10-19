@@ -134,6 +134,27 @@ src/
     .well-known/security.txt
 ----
 
+== Tests
+
+[source,bash]
+----
+./build/exec/ddraig test-state       # also test-markdown, -frontmatter, -full, -attest
+sh tests/golden.sh                   # compare output with tests/golden/
+sh tests/golden.sh --update          # after an intended output change; review the diff
+----
+
+`tests/golden.sh` compares, byte for byte, the output of each `test-*`
+subcommand and the site built from `examples/` with the expected output in
+`tests/golden/`. A change to `ddraig`'s output therefore shows up as a diff of
+those files, committed with the change that caused it.
+
+The tests pin the build date with `SOURCE_DATE_EPOCH`
+(https://reproducible-builds.org/specs/source-date-epoch/[spec]). When that
+variable is set to a number of seconds since 1970-01-01 UTC, `ddraig build`
+uses it instead of the clock for the attestation's `generated` date and the
+feed's fallback `<updated>`, so the same sources always give the same output.
+Any other non-empty value stops the build with an error.
+
 == Licence
 
 Code is licensed under link:LICENSE[MPL-2.0]; prose documentation under
