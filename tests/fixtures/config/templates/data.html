@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: MPL-2.0 -->
+<html lang="{{lang}}">
+<head><meta charset="UTF-8"><title>{{title}} - {{site.title}}</title></head>
+<body>
+<nav aria-label="Primary"><ul>
+        {{menu}}
+</ul></nav>
+<main>
+{{content}}
+<dl>
+<dt>site.title</dt><dd>{{site.title}}</dd>
+<dt>site.base_url</dt><dd>{{site.base_url}}</dd>
+<dt>site.language</dt><dd>{{site.language}}</dd>
+<dt>site.description</dt><dd>{{site.description}}</dd>
+<dt>site.author</dt><dd>{{site.author}}</dd>
+<dt>author (page, else site)</dt><dd>{{author}}</dd>
+<dt>site.extra.github</dt><dd>{{site.extra.github}}</dd>
+<dt>site.extra.year</dt><dd>{{site.extra.year}}</dd>
+<dt>site.extra.draft_banner</dt><dd>{{site.extra.draft_banner}}</dd>
+<dt>data.team.lead</dt><dd>{{data.team.lead}}</dd>
+<dt>data.team.roles.editor</dt><dd>{{data.team.roles.editor}}</dd>
+</dl>
+</main>
+</body>
+</html>

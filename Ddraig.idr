@@ -19,6 +19,8 @@ import Html
 import State
 import Attest
 import Diagnostic
+import Toml
+import Config
 
 %default covering
 
@@ -40,10 +42,12 @@ record Frontmatter where
   description : String
   slug : String
   brand : String
+  lang : String     -- overrides [site] language for this page
+  author : String   -- overrides [site] author for this page
 
 export
 emptyFrontmatter : Frontmatter
-emptyFrontmatter = MkFrontmatter "" "" [] False "default" "" "" ""
+emptyFrontmatter = MkFrontmatter "" "" [] False "default" "" "" "" "" ""
 
 -- A built page, retained for sitemap/feed generation.
 public export
@@ -152,6 +156,8 @@ parseFmLine line fm =
            "slug" => { slug := value } fm
            "site" => { brand := value } fm
            "brand" => { brand := value } fm
+           "lang" => { lang := value } fm
+           "author" => { author := value } fm
            "draft" => { draft := (value == "true" || value == "yes") } fm
            "tags" =>
              let tagStr = if strHasPrefix "[" value
@@ -543,7 +549,7 @@ buildToc hs =
 defTemplate : String
 defTemplate = """
 <!DOCTYPE html>
-<html lang="en" prefix="rdf: http://www.w3.org/1999/02/22-rdf-syntax-ns# rdfs: http://www.w3.org/2000/01/rdf-schema# owl: http://www.w3.org/2002/07/owl# schema: http://schema.org/">
+<html lang="{{lang}}" prefix="rdf: http://www.w3.org/1999/02/22-rdf-syntax-ns# rdfs: http://www.w3.org/2000/01/rdf-schema# owl: http://www.w3.org/2002/07/owl# schema: http://schema.org/">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -568,7 +574,7 @@ defTemplate = """
     <nav class="container nav" aria-label="Primary" role="navigation" typeof="schema:SiteNavigationElement">
       <a class="brand" href="{{root}}/" property="schema:url"><span property="schema:name">{{brand}}</span></a>
       <ul class="nav-links">
-        <li><a href="{{root}}/" property="schema:url">Home</a></li>
+        {{menu}}
       </ul>
     </nav>
   </header>
@@ -750,17 +756,44 @@ stripPlaceholders s = pack (go (unpack s))
          then go (afterClose (drop 2 cs))
       else c :: go rest
 
+-- Page values a template can show besides the front matter's. The caller
+-- applies the precedence (front matter, then ddraig.toml, then default).
+record PageVars where
+  constructor MkPageVars
+  pvRoot      : String   -- {{root}}: the base URL's path, e.g. /ddraig-ssg
+  pvCanonical : String   -- {{canonical}}
+  pvLang      : String   -- {{lang}}
+  pvMenu      : String   -- {{menu}}: the menu's list items, rendered HTML
+  pvAuthor    : String   -- {{author}}
+
+-- The menu shown when ddraig.toml defines no [[menus.main]].
+defaultMenu : List MenuItem
+defaultMenu = [MkMenuItem "Home" "/"]
+
+-- A menu's list items, through the typed Html core. A url starting with "/"
+-- (but not "//") is inside the site, so the root goes in front of it.
+renderMenu : (root : String) -> List MenuItem -> String
+renderMenu root items = concat (intersperse "\n        " (map (render . item) items))
+  where
+    href : String -> String
+    href u = if strHasPrefix "/" u && not (strHasPrefix "//" u) then root ++ u else u
+    item : MenuItem -> Html
+    item m = Elem "li" [] [Elem "a" [("href", href m.itemUrl), ("property", "schema:url")] [Text m.itemName]]
+
 export
-applyTemplate : String -> Frontmatter -> (root : String) -> (canonical : String) -> String -> String -> String
-applyTemplate template fm root canonical htmlContent tocHtml =
+applyTemplate : String -> Frontmatter -> PageVars -> String -> String -> String
+applyTemplate template fm pv htmlContent tocHtml =
   let brand = if fm.brand == "" then fm.title else fm.brand
       t1 = strReplace template "{{title}}" (strEscape fm.title)
       t2 = strReplace t1 "{{date}}" (strEscape fm.date)
       t3 = strReplace t2 "{{description}}" (strEscape fm.description)
       t4 = strReplace t3 "{{brand}}" (strEscape brand)
-      tc = strReplace t4 "{{canonical}}" (strEscape canonical)
-      tr = strReplace tc "{{root}}" (strEscape root)
-      t5 = strReplace tr "{{toc}}" tocHtml
+      tc = strReplace t4 "{{canonical}}" (strEscape pv.pvCanonical)
+      tr = strReplace tc "{{root}}" (strEscape pv.pvRoot)
+      tl = strReplace tr "{{lang}}" (strEscape pv.pvLang)
+      ta = strReplace tl "{{author}}" (strEscape pv.pvAuthor)
+      tm = strReplace ta "{{menu}}" pv.pvMenu
+      t5 = strReplace tm "{{toc}}" tocHtml
       -- strip any remaining unfilled placeholders BEFORE injecting content,
       -- so author content (which may legitimately contain braces) is untouched
       t6 = stripPlaceholders t5
@@ -892,15 +925,18 @@ resolvePartials src tpl = go tpl 64
                        _ => findInclude more (c :: acc)
              else findInclude more (c :: acc)
 
--- Load template by layout name; fall back to built-in.
-loadTemplate : HasIO io => (src : String) -> (layout : String) -> io String
-loadTemplate src layout = do
+-- Load template by layout name; fall back to built-in. Partials are inlined,
+-- then {{site...}} and {{data...}} variables are filled in (they were checked
+-- before the build started, by checkTemplates).
+loadTemplate : HasIO io => (src : String) -> (vars : List (String, TValue)) -> (layout : String) -> io String
+loadTemplate src vars layout = do
   let name = if layout == "" then "default" else layout
   let name2 = if strHasSuffix ".html" name then name else name ++ ".html"
   let path = joinPath src ("templates/" ++ name2)
   r <- readFile path
   case r of
-    Right c => resolvePartials src c
+    Right c => do full <- resolvePartials src c
+                  pure (fst (resolveVars strEscape vars path full))
     Left _ => pure defTemplate
 
 -- change ".md"/".markdown" extension to ".html"
@@ -945,11 +981,30 @@ basePath base = pack (reverse (dropSlashes (reverse (pathOf (afterScheme (unpack
     dropSlashes ('/' :: rest) = dropSlashes rest
     dropSlashes cs = cs
 
--- Build one markdown file. Returns Maybe Page (Nothing if draft skipped).
+-- Everything a page build needs to know about the site.
+record BuildCtx where
+  constructor MkBuildCtx
+  ctxSrc  : String
+  ctxOut  : String
+  ctxBase : String                  -- the base URL in effect
+  ctxCfg  : SiteConfig              -- ddraig.toml (noConfig without one)
+  ctxVars : List (String, TValue)   -- {{site...}} and {{data...}} values
+
+-- The first non-empty of a front matter value and a site value, else a default.
+pick : String -> Maybe String -> String -> String
+pick page site dflt =
+  if page /= "" then page else case site of
+    Just s  => if s /= "" then s else dflt
+    Nothing => dflt
+
 -- Build one markdown file. Returns the Page plus its O3 certification status
 -- (certified?, violations). Nothing only when the file is a draft or unreadable.
-buildOne : HasIO io => (src : String) -> (out : String) -> (base : String) -> (rel : String) -> io (Maybe (Page, Bool, List String))
-buildOne src out base rel = do
+buildOne : HasIO io => BuildCtx -> (rel : String) -> io (Maybe (Page, Bool, List String))
+buildOne ctx rel = do
+  let src = ctx.ctxSrc
+  let out = ctx.ctxOut
+  let base = ctx.ctxBase
+  let cfg = ctx.ctxCfg
   let inPath = joinPath src rel
   r <- readFile inPath
   case r of
@@ -961,12 +1016,19 @@ buildOne src out base rel = do
          else do
            let md = parseMarkdownFull body
            let toc = buildToc md.toc
-           tpl <- loadTemplate src fm.template
+           tpl <- loadTemplate src ctx.ctxVars fm.template
            let title = if fm.title == "" then rel else fm.title
            let fm2 = { title := title } fm
            let relHtml = toHtmlPath rel
            let canonical = absUrl base ("/" ++ relHtml)
-           let html = applyTemplate tpl fm2 (basePath base) canonical md.body toc
+           let root = basePath base
+           -- precedence: front matter, then ddraig.toml, then the default
+           let shown = { brand := pick fm.brand cfg.siteTitle ""
+                       , description := pick fm.description cfg.siteDescription "" } fm2
+           let menuItems = fromMaybe defaultMenu (lookup "main" cfg.siteMenus)
+           let pv = MkPageVars root canonical (pick fm.lang cfg.siteLanguage "en")
+                               (renderMenu root menuItems) (pick fm.author cfg.siteAuthor "")
+           let html = applyTemplate tpl shown pv md.body toc
            let outPath = joinPath out relHtml
            _ <- mkDirP (dirOf outPath)
            w <- writeFile outPath html
@@ -1122,13 +1184,15 @@ genSitemap base out pages = do
 -- feed.xml (Atom). Emits every RFC 4287-required element: feed
 -- id/title/updated/author and per-entry id/title/updated. Ids and links are
 -- absolute when a base URL is supplied, urn: ids otherwise.
-genFeed : HasIO io => (base : String) -> (out : String) -> (now : String) -> List Page -> io ()
-genFeed base out now pages = do
+genFeed : HasIO io => (base : String) -> (out : String) -> (now : String)
+       -> (siteTitle : Maybe String) -> List Page -> io ()
+genFeed base out now siteTitle pages = do
   let dated = filter (/= "") (map (\pg => pg.fm.date) pages)
   let feedUpdated = rfc3339 (case dated of
                                [] => now
                                _  => foldl (\a, b => if a >= b then a else b) "" dated)
-  let siteName = case filter (/= "") (map (\pg => pg.fm.brand) pages) of
+  -- [site] title from ddraig.toml if set, else the first page's site/brand
+  let siteName = case filter (/= "") (maybe [] pure siteTitle ++ map (\pg => pg.fm.brand) pages) of
                    (b :: _) => b
                    []       => "Ddraig Site"
   let entries = concatMap (entry feedUpdated) pages
@@ -1204,17 +1268,23 @@ writeAttestation base out now results = do
 report : HasIO io => List Diagnostic -> io ()
 report ds = do
   srcs <- traverse load (nub (mapMaybe diagFile ds))
+  -- progress written so far comes first, even when stdout is a buffered pipe
+  fflush stdout
   ignore (fPutStr stderr (renderAll (\f => join (lookup f srcs)) ds))
   where
     load : String -> io (String, Maybe String)
     load f = do r <- readFile f; pure (f, either (const Nothing) Just r)
 
+-- Report problems, then a one-line verdict, and exit with status 1.
+failWith : HasIO io => (verdict : String) -> List Diagnostic -> io a
+failWith verdict ds = do
+  report ds
+  ignore (fPutStrLn stderr ("\nddraig: " ++ verdict ++ ": " ++ summary ds))
+  exitWith (ExitFailure 1)
+
 -- Report problems that stop a build, and exit with status 1.
 failBuild : HasIO io => List Diagnostic -> io a
-failBuild ds = do
-  report ds
-  ignore (fPutStrLn stderr ("\nddraig: build stopped: " ++ summary ds))
-  exitWith (ExitFailure 1)
+failBuild = failWith "build stopped"
 
 -- Report a mistake on the command line, and exit with status 2.
 failUsage : HasIO io => List Diagnostic -> io a
@@ -1233,31 +1303,113 @@ checkSourceDir src = do
              else withHelp "check the spelling; a relative path starts from the directory ddraig runs in" $
                   diagError SourceDirMissing ("source directory \"" ++ src ++ "\" does not exist") ]
 
+-- Parse and check the text of a site configuration (DDR01xx).
+checkConfigText : (path : String) -> (text : String) -> Either (List Diagnostic) SiteConfig
+checkConfigText path text =
+  let (tables, syntaxProblems) = parseToml path text in
+  case validateConfig path tables of
+    Left ds   => Left (syntaxProblems ++ ds)
+    Right cfg => if null syntaxProblems then Right cfg else Left syntaxProblems
+
+-- <src>/ddraig.toml, checked; the defaults when there is none.
+loadSiteConfig : HasIO io => (src : String) -> io (Maybe String, Either (List Diagnostic) SiteConfig)
+loadSiteConfig src = do
+  let path = joinPath src "ddraig.toml"
+  r <- readFile path
+  case r of
+    Left _     => pure (Nothing, Right noConfig)
+    Right text => pure (Just path, checkConfigText path text)
+
+-- <src>/data/*.toml, read for templates; any TOML problems in them.
+loadDataFiles : HasIO io => (src : String) -> io (List DataFile, List Diagnostic)
+loadDataFiles src = do
+  r <- listDir (joinPath src "data")
+  case r of
+    Left _      => pure ([], [])
+    Right names => go (sort (filter (strHasSuffix ".toml") names)) [] []
+  where
+    go : List String -> List DataFile -> List Diagnostic -> io (List DataFile, List Diagnostic)
+    go [] fs ds = pure (reverse fs, ds)
+    go (n :: ns) fs ds = do
+      let path = joinPath src ("data/" ++ n)
+      r <- readFile path
+      case r of
+        Left _ => go ns fs (ds ++ [ inFile path (diagError ConfigUnreadable ("cannot read \"" ++ path ++ "\"")) ])
+        Right text =>
+          let (ts, errs) = parseToml path text in
+          go ns (MkDataFile (substr 0 (length n `minus` 5) n) ts :: fs) (ds ++ errs)
+
+-- Every template and partial, checked for {{site...}} and {{data...}}
+-- variables that do not exist (DDR0201) or hold a list (DDR0202).
+checkTemplates : HasIO io => (src : String) -> List (String, TValue) -> io (List Diagnostic)
+checkTemplates src vars = do
+  let dir = joinPath src "templates"
+  rels <- walkFiles dir ""
+  found <- traverse (\rel => do
+             let path = joinPath dir rel
+             r <- readFile path
+             pure (case r of
+                     Right text => snd (resolveVars strEscape vars path text)
+                     Left _     => []))
+           (filter (strHasSuffix ".html") rels)
+  pure (concat found)
+
+-- `ddraig validate-config <file>`: the same checks `ddraig build` makes.
+validateConfigFile : HasIO io => String -> io ()
+validateConfigFile path = do
+  r <- readFile path
+  case r of
+    Left _ => failWith ("cannot check " ++ path)
+                [ withHelp "check the path; `ddraig build` reads ddraig.toml from the source directory" $
+                  diagError ConfigUnreadable ("cannot read \"" ++ path ++ "\"") ]
+    Right text => case checkConfigText path text of
+      Right _ => putStrLn ("OK: " ++ path ++ " is a valid site configuration")
+      Left ds => failWith (path ++ " is not a valid site configuration") ds
+
 -- Full build command. Everything that can be checked before writing output is
 -- checked first, and all of it is reported together.
-buildSite : HasIO io => (src : String) -> (out : String) -> (base : String) -> io ()
-buildSite src out base = do
+buildSite : HasIO io => (src : String) -> (out : String) -> (cliBase : String) -> io ()
+buildSite src out cliBase = do
   putStrLn ("Ddraig build: " ++ src ++ " -> " ++ out)
   srcProblems <- checkSourceDir src
   today <- currentUtcDate
+  let srcOk = null srcProblems
+  -- (with no source directory these find nothing, and report nothing)
+  (cfgPath, cfgResult) <- loadSiteConfig src
+  (datas, dataProblems) <- loadDataFiles src
+  let cfg = either (const noConfig) id cfgResult
+  -- base URL: the command line's, else ddraig.toml's
+  let base = if cliBase /= "" then cliBase else fromMaybe "" cfg.siteBaseUrl
+  let vars = templateVars cfg base datas
+  -- templates are checked only against a valid configuration and readable
+  -- data files, so one mistake is not reported again as many
+  tplProblems <- if srcOk && either (const False) (const True) cfgResult && null dataProblems
+                   then checkTemplates src vars else pure []
+  let problems = srcProblems ++ either id (const []) cfgResult ++ dataProblems
+                 ++ tplProblems ++ either (\d => [d]) (const []) today
   case today of
-    Left d => failBuild (srcProblems ++ [d])
+    Left _ => failBuild problems
     Right now =>
-     if not (null srcProblems)
-     then failBuild srcProblems
+     if not (null problems)
+     then failBuild problems
      else do
+       traverse_ (\p => putStrLn ("  config: " ++ p)) cfgPath
+       when (base /= "") $
+         putStrLn ("  base URL: " ++ base
+                   ++ (if cliBase /= "" then " (from the command line)" else " (from ddraig.toml)"))
+       let ctx = MkBuildCtx src out base cfg vars
        _ <- mkDirP out
        all <- walkFiles src ""
        -- skip files under templates/, public/, and the asset dirs (handled separately)
        let mdFiles = filter (\p => isMarkdown p && not (underSpecial p)) all
        putStrLn ("Found " ++ show (length mdFiles) ++ " markdown file(s).")
-       results <- buildEach mdFiles
+       results <- buildEach ctx mdFiles
        let pages = map (\(p, _, _) => p) results
        copyAssets src out
        writeDefaultStyle src out
        copyPublic src out
        genSitemap base out pages
-       genFeed base out now pages
+       genFeed base out now cfg.siteTitle pages
        writeAttestation base out now results
        putStrLn ("Done. " ++ show (length pages) ++ " page(s) built.")
        let failed = filter (\(_, c, _) => not c) results
@@ -1271,12 +1423,12 @@ buildSite src out base = do
     underSpecial : String -> Bool
     underSpecial p =
       any (\d => strHasPrefix (d ++ "/") p)
-          ["templates","public","assets","static","css","js","images"]
-    buildEach : List String -> io (List (Page, Bool, List String))
-    buildEach [] = pure []
-    buildEach (f :: fs) = do
-      mp <- buildOne src out base f
-      rest <- buildEach fs
+          ["templates","public","assets","static","css","js","images","data"]
+    buildEach : BuildCtx -> List String -> io (List (Page, Bool, List String))
+    buildEach _ [] = pure []
+    buildEach ctx (f :: fs) = do
+      mp <- buildOne ctx f
+      rest <- buildEach ctx fs
       pure (maybe rest (:: rest) mp)
 
 -- clean command: remove output dir contents (best-effort, recursive).
@@ -1319,14 +1471,18 @@ testFull = do
   let content = "---\ntitle: Welcome\ndate: 2024-01-15\n---\n\n# Welcome\n\nThis is **Ddraig**, an Idris 2-powered SSG.\n\n- Dependently typed\n- Provably correct\n"
   let (fm, body) = parseFrontmatter content
   let md = parseMarkdownFull body
-  let output = applyTemplate defTemplate fm "" "/welcome.html" md.body (buildToc md.toc)
+  let output = applyTemplate defTemplate fm
+                 (MkPageVars "" "/welcome.html" "en" (renderMenu "" defaultMenu) "")
+                 md.body (buildToc md.toc)
   putStrLn output
   -- {{root}}: a sub-path site's links must carry its prefix.
   let cases = [ ("", ""), ("https://example.com", ""), ("https://example.com/", "")
               , ("https://hyperpolymath.github.io/ddraig-ssg", "/ddraig-ssg")
               , ("https://example.org/a/b/", "/a/b") ]
   let wrong = filter (\(b, want) => basePath b /= want) cases
-  let rooted = applyTemplate defTemplate fm "/sub" "/sub/welcome.html" md.body ""
+  let rooted = applyTemplate defTemplate fm
+                 (MkPageVars "/sub" "/sub/welcome.html" "en" (renderMenu "/sub" defaultMenu) "")
+                 md.body ""
   let styled = strReplace rooted "href=\"/sub/assets/style.css\"" "" /= rooted
   if null wrong && styled
      then putStrLn "OK: basePath and {{root}}"
@@ -1461,6 +1617,7 @@ commands =
   [ MkCommand "build"          "<src> <out> [base-url]" 2 3
   , MkCommand "clean"          "<out>"                  1 1
   , MkCommand "validate-state" "<file.a2ml>"            1 1
+  , MkCommand "validate-config" "<ddraig.toml>"         1 1
   , MkCommand "explain"        "[code]"                 0 1
   , MkCommand "--help"         ""                       0 0
   , MkCommand "--version"      ""                       0 0 ]
@@ -1517,6 +1674,8 @@ usage = do
   putStrLn "        build date, so the same sources always give the same output"
   putStrLn "  ddraig clean <out>         Remove built files under <out>"
   putStrLn "  ddraig validate-state <file.a2ml>  Validate an a2ml STATE descriptile"
+  putStrLn "  ddraig validate-config <ddraig.toml>  Check a site configuration"
+  putStrLn "        (ddraig build reads <src>/ddraig.toml if there is one)"
   putStrLn "  ddraig explain [code]      Explain a diagnostic code such as DDR0002;"
   putStrLn "                             with no code, list them all"
   putStrLn "  ddraig --version           Print version"
@@ -1549,6 +1708,7 @@ main = do
     [_, "build", src, out, base] => buildSite src out base
     [_, "clean", out] => cleanOut out
     [_, "validate-state", path] => validateStateFile path
+    [_, "validate-config", path] => validateConfigFile path
     [_, "explain"] => putStr renderCodeList
     [_, "explain", code] => explainCode code
     (_ :: cmd :: rest) => failUsage [badInvocation cmd rest]

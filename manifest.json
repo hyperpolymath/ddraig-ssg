@@ -10,6 +10,8 @@
   "features": {
     "recursiveBuild": true,
     "frontmatter": true,
+    "siteConfig": "ddraig.toml",
+    "dataFiles": "data/*.toml",
     "drafts": true,
     "markdown": true,
     "headingAnchors": true,
@@ -42,6 +44,7 @@
     "build": "ddraig build <src> <out> [base-url]",
     "clean": "ddraig clean <out>",
     "explain": "ddraig explain [code]",
+    "validateConfig": "ddraig validate-config <ddraig.toml>",
     "version": "ddraig --version"
   },
   "test": {

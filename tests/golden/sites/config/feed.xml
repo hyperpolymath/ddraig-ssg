@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Config Fixture</title>
+  <id>https://config.example/docs/feed.xml</id>
+  <updated>2026-06-24T00:00:00Z</updated>
+  <author><name>Config Fixture</name></author>
+  <link rel="self" href="https://config.example/docs/feed.xml"/>
+  <generator>Ddraig SSG 0.2.0</generator>
+  <entry>
+    <title>About</title>
+    <id>https://config.example/docs/about.html</id>
+    <link href="https://config.example/docs/about.html"/>
+    <updated>2026-06-23T00:00:00Z</updated>
+    <summary>Page description</summary>
+  </entry>
+  <entry>
+    <title>Data</title>
+    <id>https://config.example/docs/data.html</id>
+    <link href="https://config.example/docs/data.html"/>
+    <updated>2026-06-24T00:00:00Z</updated>
+    <summary></summary>
+  </entry>
+  <entry>
+    <title>Croeso</title>
+    <id>https://config.example/docs/index.html</id>
+    <link href="https://config.example/docs/index.html"/>
+    <updated>2026-06-22T00:00:00Z</updated>
+    <summary></summary>
+  </entry>
+</feed>

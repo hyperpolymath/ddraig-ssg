@@ -18,8 +18,13 @@ toc::[]
 
 * *Recursive multi-page build* — mirrors a source tree of `.md`/`.markdown`
   into an output tree of `.html`.
+* *Site configuration* — an optional `ddraig.toml` (title, base URL,
+  language, description, author, menus, `[extra]` values) and `data/*.toml`
+  files for templates. Front matter overrides site values. Checked by a
+  *total* decision before anything is written; every mistake is reported with
+  its line and column. See link:CONFIGURATION.adoc[CONFIGURATION.adoc].
 * *Front-matter* — `title`, `date`, `description`, `slug`, `site`/`brand`,
-  `tags`, `layout`/`template`, `draft` (drafts are skipped). Tolerates a
+  `tags`, `layout`/`template`, `lang`, `author`, `draft` (drafts are skipped). Tolerates a
   leading SPDX HTML comment before the `---` fence.
 * *Rich Markdown* — headings with anchor IDs, bold/italic/strikethrough,
   inline code, links, images, blockquotes, ordered + unordered + nested lists,
@@ -87,6 +92,7 @@ Requires `idris2 >= 0.8.0`.
 ddraig build <src-dir> <out-dir> [base-url]   # build a site
 ddraig clean <out-dir>                         # remove an output dir
 ddraig validate-state <file.a2ml>              # validate an a2ml STATE descriptile
+ddraig validate-config <ddraig.toml>           # check a site configuration
 ddraig explain [code]                          # explain a diagnostic code, or list them
 ddraig --version
 ddraig --help
@@ -131,6 +137,8 @@ A site directory may contain:
 [source]
 ----
 src/
+  ddraig.toml           # optional site configuration (CONFIGURATION.adoc)
+  data/team.toml        # optional data for templates: {{data.team.<key>}}
   index.md              # pages (front-matter + Markdown)
   blog/post.md          # nested pages mirror into the output tree
   templates/

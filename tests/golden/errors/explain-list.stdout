@@ -3,3 +3,14 @@ DDR0002  the source directory does not exist, or is not a directory
 DDR0003  the first argument is not a ddraig command
 DDR0004  a command was given the wrong number of arguments
 DDR0005  `ddraig explain` was given an identifier that is not a diagnostic code
+DDR0101  a line of a TOML file is not valid TOML
+DDR0102  a TOML feature that ddraig does not read
+DDR0103  a key or a table is defined twice
+DDR0104  ddraig.toml has a table ddraig does not know
+DDR0105  a table in ddraig.toml has a key ddraig does not know
+DDR0106  a setting in ddraig.toml has the wrong kind of value
+DDR0107  a setting in ddraig.toml has a value ddraig cannot use
+DDR0108  a menu entry is missing its name or its url
+DDR0109  a configuration file could not be read
+DDR0201  a template uses a {{site...}} or {{data...}} variable that does not exist
+DDR0202  a template variable holds a list, which cannot be shown as text

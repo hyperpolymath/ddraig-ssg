@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: MPL-2.0
+# Deliberately broken: tests/golden.sh checks that every problem is reported.
+titel = "Outside any table"
+
+[sitee]
+title = "Typo in the table name"
+
+[site]
+titel = "Typo in a key"
+language = 42
+base_url = "hyperpolymath.github.io/ddraig-ssg"
+description = "Never closed
+author = "First"
+author = "Second"
+
+[[menus.main]]
+name = "Home"
+
+[menus.footer]
+name = "Legal"
+url = "/legal.html"
+
+[extra]
+ratio = 1.5
+launched = 2026-06-22
+tags = ["a",

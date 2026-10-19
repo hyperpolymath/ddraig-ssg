@@ -72,6 +72,8 @@ be stated, scoped, and discharged on its own.
 | *O1* | *a2ml schema validity* — a *total* validator decides whether a
   descriptile conforms to the schema. _First realization landed:_ `State.idr`
   (`validateState`, `total`) for the TOML-like 6a2 STATE descriptile format.
+  The site configuration follows the same pattern: `Config.idr`
+  (`validateConfig`, `total`) over the tables `Toml.idr` reads.
 | Decidable; achievable now.
 
 | *O2* | *Output well-formedness* — a typed HTML AST in which malformed markup

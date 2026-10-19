@@ -12,11 +12,11 @@
 -- and, for a problem in a file, the file:line:column, the source line, and a
 -- caret under the exact text:
 --
---   error[DDR0101]: unknown key "titel" in [site]
+--   error[DDR0105]: unknown key "titel" in [site]
 --    --> ddraig.toml:3:1
 --     |
 --   3 | titel = "My site"
---     | ^^^^^ not a known key
+--     | ^^^^^ not a [site] key
 --     |
 --     = help: did you mean "title"?
 --
@@ -53,23 +53,49 @@ data Code
   | UnknownCommand
   | WrongArguments
   | UnknownCode
+  | TomlSyntax
+  | TomlUnsupported
+  | TomlDuplicate
+  | ConfigUnknownTable
+  | ConfigUnknownKey
+  | ConfigWrongType
+  | ConfigBadValue
+  | ConfigMenuEntry
+  | ConfigUnreadable
+  | TemplateUnknownVariable
+  | TemplateNotText
 
 ||| Every code, in identifier order. Keep in step with `Code`: the
 ||| test-diagnostics subcommand checks that identifiers are unique and that
 ||| each one round-trips through `fromId`.
 public export
 allCodes : List Code
-allCodes = [BadSourceDateEpoch, SourceDirMissing, UnknownCommand, WrongArguments, UnknownCode]
+allCodes =
+  [ BadSourceDateEpoch, SourceDirMissing, UnknownCommand, WrongArguments, UnknownCode
+  , TomlSyntax, TomlUnsupported, TomlDuplicate, ConfigUnknownTable, ConfigUnknownKey
+  , ConfigWrongType, ConfigBadValue, ConfigMenuEntry, ConfigUnreadable
+  , TemplateUnknownVariable, TemplateNotText ]
 
 ||| The stable identifier printed in messages and accepted by `ddraig explain`.
 ||| Never reuse or renumber one: people search for them.
 public export
 codeId : Code -> String
-codeId BadSourceDateEpoch = "DDR0001"
-codeId SourceDirMissing   = "DDR0002"
-codeId UnknownCommand     = "DDR0003"
-codeId WrongArguments     = "DDR0004"
-codeId UnknownCode        = "DDR0005"
+codeId BadSourceDateEpoch      = "DDR0001"
+codeId SourceDirMissing        = "DDR0002"
+codeId UnknownCommand          = "DDR0003"
+codeId WrongArguments          = "DDR0004"
+codeId UnknownCode             = "DDR0005"
+codeId TomlSyntax              = "DDR0101"
+codeId TomlUnsupported         = "DDR0102"
+codeId TomlDuplicate           = "DDR0103"
+codeId ConfigUnknownTable      = "DDR0104"
+codeId ConfigUnknownKey        = "DDR0105"
+codeId ConfigWrongType         = "DDR0106"
+codeId ConfigBadValue          = "DDR0107"
+codeId ConfigMenuEntry         = "DDR0108"
+codeId ConfigUnreadable        = "DDR0109"
+codeId TemplateUnknownVariable = "DDR0201"
+codeId TemplateNotText         = "DDR0202"
 
 ||| Look a code up by its identifier (exact match).
 export
@@ -125,6 +151,91 @@ explanation UnknownCode = MkExplanation
   "`ddraig explain` was given an identifier that is not a diagnostic code"
   [ "Diagnostic codes look like DDR0001. Run `ddraig explain` with no argument to"
   , "list every code with a one-line description."
+  ]
+explanation TomlSyntax = MkExplanation
+  "a line of a TOML file is not valid TOML"
+  [ "ddraig.toml and the files in data/ are TOML. Each line is a [table] header,"
+  , "a key = value pair, a # comment, or blank. Strings are written in double"
+  , "quotes (\"...\") or single quotes ('...') and must be closed on the same"
+  , "line. The message points at the part that could not be read."
+  , ""
+  , "    [site]"
+  , "    title = \"My site\"   # a comment"
+  ]
+explanation TomlUnsupported = MkExplanation
+  "a TOML feature that ddraig does not read"
+  [ "ddraig reads a subset of TOML, listed in CONFIGURATION.adoc, and reports"
+  , "anything else rather than guessing. Not supported: floating-point numbers,"
+  , "dates and times (write them as strings: \"2026-06-22\"), multi-line strings,"
+  , "arrays that span several lines, inline tables { ... }, and dotted keys"
+  , "(a.b = 1; use a [a] table header instead)."
+  ]
+explanation TomlDuplicate = MkExplanation
+  "a key or a table is defined twice"
+  [ "TOML allows each key once per table, and each [table] header once. The"
+  , "message shows where the first definition is. Delete one of the two, or, for"
+  , "a list of similar tables such as menu entries, use [[double brackets]]."
+  ]
+explanation ConfigUnknownTable = MkExplanation
+  "ddraig.toml has a table ddraig does not know"
+  [ "The tables of ddraig.toml are [site], [extra] and [[menus.<name>]]."
+  , "Settings outside any table are not allowed: put site settings under [site],"
+  , "and your own values under [extra]. CONFIGURATION.adoc lists every key."
+  ]
+explanation ConfigUnknownKey = MkExplanation
+  "a table in ddraig.toml has a key ddraig does not know"
+  [ "[site] takes title, base_url, language, description and author. A menu"
+  , "entry ([[menus.<name>]]) takes name and url. Keys are case-sensitive. Values"
+  , "of your own, for templates, go under [extra], where any key is allowed."
+  ]
+explanation ConfigWrongType = MkExplanation
+  "a setting in ddraig.toml has the wrong kind of value"
+  [ "Every key of [site] and of a menu entry takes a string, written in quotes:"
+  , ""
+  , "    language = \"cy\""
+  , ""
+  , "not a number, true/false, or a list."
+  ]
+explanation ConfigBadValue = MkExplanation
+  "a setting in ddraig.toml has a value ddraig cannot use"
+  [ "base_url must be an absolute http:// or https:// address without spaces,"
+  , "such as \"https://example.org\" or, for a site served under a sub-path,"
+  , "\"https://user.github.io/repo\". language must be a language tag such as"
+  , "\"en\", \"cy\" or \"pt-BR\": letters, digits and hyphens, starting with two or"
+  , "three letters."
+  ]
+explanation ConfigMenuEntry = MkExplanation
+  "a menu entry is missing its name or its url"
+  [ "Each [[menus.<name>]] entry is one link and needs both keys:"
+  , ""
+  , "    [[menus.main]]"
+  , "    name = \"About\""
+  , "    url = \"/about.html\""
+  , ""
+  , "A url starting with / is inside the site and gets the base URL's path in"
+  , "front of it; other urls are used as written."
+  ]
+explanation ConfigUnreadable = MkExplanation
+  "a configuration file could not be read"
+  [ "`ddraig validate-config <file>` needs an existing, readable file. `ddraig"
+  , "build` reads <src>/ddraig.toml only if it exists; without it, the defaults"
+  , "apply."
+  ]
+explanation TemplateUnknownVariable = MkExplanation
+  "a template uses a {{site...}} or {{data...}} variable that does not exist"
+  [ "{{site.title}}, {{site.base_url}}, {{site.language}}, {{site.description}},"
+  , "{{site.author}} and {{site.extra.<key>}} come from ddraig.toml."
+  , "{{data.<file>.<key>}} comes from data/<file>.toml, with table names in"
+  , "between for keys inside a [table]: {{data.team.roles.editor}}."
+  , ""
+  , "Check the spelling; the message suggests the nearest variable that exists."
+  , "A variable that exists but has no value set is shown as empty, not an error."
+  ]
+explanation TemplateNotText = MkExplanation
+  "a template variable holds a list, which cannot be shown as text"
+  [ "Templates can show strings, numbers and true/false. A list, such as"
+  , "tags = [\"a\", \"b\"], needs a loop, which arrives with the template engine"
+  , "(work package 1, milestone 2). Until then, use a string."
   ]
 
 -- ============================================================================

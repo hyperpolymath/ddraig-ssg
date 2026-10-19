@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MPL-2.0
+lead = "Ada"
+
+[roles]
+editor = "Grace & Co <editors>"

@@ -1,0 +1,11 @@
+{
+  "generator": "Ddraig SSG 0.2.0",
+  "generated": "2026-06-22T00:00:00Z",
+  "scope": "decidable WCAG subset (content tree)",
+  "predicates": ["one-h1", "heading-no-skip", "alt-present-by-construction"],
+  "pages": [
+    {"page": "https://config.example/docs/about.html", "certified": true, "violations": []},
+    {"page": "https://config.example/docs/data.html", "certified": true, "violations": []},
+    {"page": "https://config.example/docs/index.html", "certified": true, "violations": []}
+  ]
+}

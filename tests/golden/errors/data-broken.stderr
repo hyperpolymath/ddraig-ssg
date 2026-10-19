@@ -1,0 +1,17 @@
+error[DDR0101]: this value is not valid TOML
+ --> fixtures/data-broken/data/bad.toml:2:8
+  |
+2 | name = Ada
+  |        ^^^ not a string, number, true/false or list
+  |
+  = help: if it is text, put it in quotes: "Ada"
+
+error[DDR0102]: floating-point numbers are not supported
+ --> fixtures/data-broken/data/bad.toml:3:9
+  |
+3 | since = 1.0
+  |         ^^^
+  |
+  = help: write it as a string, "1.0", or as a whole number
+
+ddraig: build stopped: 2 errors

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en" prefix="rdf: http://www.w3.org/1999/02/22-rdf-syntax-ns# rdfs: http://www.w3.org/2000/01/rdf-schema# owl: http://www.w3.org/2002/07/owl# schema: http://schema.org/">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title property="schema:name">About</title>
+  <meta name="description" property="schema:description" content="Page description">
+  <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://config.example/docs/about.html">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Page Brand">
+  <meta property="og:title" content="About">
+  <meta property="og:description" content="Page description">
+  <meta property="og:url" content="https://config.example/docs/about.html">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="About">
+  <meta name="twitter:description" content="Page description">
+  <link rel="stylesheet" href="/docs/assets/style.css">
+</head>
+<body typeof="schema:WebPage">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" role="banner">
+    <nav class="container nav" aria-label="Primary" role="navigation" typeof="schema:SiteNavigationElement">
+      <a class="brand" href="/docs/" property="schema:url"><span property="schema:name">Page Brand</span></a>
+      <ul class="nav-links">
+        <li><a href="/docs/" property="schema:url">Home</a></li>
+        <li><a href="/docs/about.html" property="schema:url">About</a></li>
+        <li><a href="https://example.org/source" property="schema:url">Source &amp; issues</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main" class="container" tabindex="-1" role="main">
+    <article class="prose" role="article" typeof="schema:Article">
+      <meta property="schema:datePublished" content="2026-06-23">
+      <h1 id="about">About</h1>
+<p>This page overrides the site name, description, language and author in its front matter.</p>
+
+    </article>
+  </main>
+
+  <footer class="site-footer" role="contentinfo">
+    <div class="container">
+      <p class="muted">Built with ddraig-ssg &middot; <time property="schema:dateModified">2026-06-23</time></p>
+    </div>
+  </footer>
+</body>
+</html>

@@ -13,6 +13,8 @@
 # Compared:
 #   tests/golden/cli/<subcommand>.out  stdout of each test-* subcommand
 #   tests/golden/examples/             the site built from examples/
+#   tests/golden/sites/<name>/         sites built from tests/fixtures/, e.g. the
+#                                      configuration precedence fixture
 #   tests/golden/errors/<case>.*       what a user sees when something is wrong:
 #                                      .stdout, .stderr and .status (exit code)
 #
@@ -59,9 +61,23 @@ done
 # relative and the same on every machine. stdout, stderr and the exit status
 # are recorded separately: problems go to stderr, progress to stdout.
 ddraig_abs=$(cd "$(dirname "$ddraig")" && pwd)/$(basename "$ddraig")
-mkdir -p "$work/errors" "$work/run"
+mkdir -p "$work/errors" "$work/run" "$work/sites"
 cp -R examples "$work/run/examples"
+cp -R tests/fixtures "$work/run/fixtures"
 printf '# Not a directory\n' > "$work/run/page.md"
+
+# --- Sites built from fixtures -------------------------------------------------
+# build_site NAME SRC [BASE-URL]: build a fixture; it must succeed.
+build_site() {
+  name=$1
+  shift
+  (cd "$work/run" && "$ddraig_abs" build "$1" "$work/sites/$name" ${2:+"$2"}) \
+    > "$work/sites-$name.log" 2>&1 \
+    || { cat "$work/sites-$name.log"; echo "golden: FAIL: building $1 failed" >&2; exit 1; }
+}
+# base URL from ddraig.toml, then the command line's overriding it
+build_site config          fixtures/config
+build_site config-cli-base fixtures/config https://cli.example
 
 # run_case NAME COMMAND...: run COMMAND in the scratch directory and record it.
 run_case() {
@@ -82,18 +98,24 @@ run_case two-problems     env SOURCE_DATE_EPOCH=-1 "$D" build no-such-dir out
 run_case explain-list     "$D" explain
 run_case explain-one      "$D" explain ddr0002
 run_case explain-unknown  "$D" explain DDR002
+run_case config-broken          "$D" build fixtures/config-broken out
+run_case validate-config-broken "$D" validate-config fixtures/config-broken/ddraig.toml
+run_case validate-config-ok     "$D" validate-config fixtures/config/ddraig.toml
+run_case validate-config-missing "$D" validate-config no-such.toml
+run_case template-vars          "$D" build fixtures/template-vars out
+run_case data-broken            "$D" build fixtures/data-broken out
 
 # --- Update, or compare ------------------------------------------------------------
 if $update; then
-  rm -rf "$golden/cli" "$golden/examples" "$golden/errors"
-  cp -R "$work/cli" "$work/examples" "$work/errors" "$golden/"
-  echo "golden: rewrote $golden/cli, $golden/examples and $golden/errors"
+  rm -rf "$golden/cli" "$golden/examples" "$golden/sites" "$golden/errors"
+  cp -R "$work/cli" "$work/examples" "$work/sites" "$work/errors" "$golden/"
+  echo "golden: rewrote $golden/cli, examples, sites and errors"
   echo "golden: review with: git status -- $golden && git diff -- $golden"
   exit 0
 fi
 
 status=0
-for d in cli examples errors; do
+for d in cli examples sites errors; do
   if ! diff -r -u "$golden/$d" "$work/$d"; then
     status=1
   fi
@@ -103,4 +125,4 @@ if [ "$status" -ne 0 ]; then
   echo "golden: if the change is intended, run: sh tests/golden.sh --update" >&2
   exit 1
 fi
-echo "golden: ok ($(find "$golden/cli" "$golden/examples" "$golden/errors" -type f | wc -l) files match)"
+echo "golden: ok ($(find "$golden/cli" "$golden/examples" "$golden/sites" "$golden/errors" -type f | wc -l) files match)"
