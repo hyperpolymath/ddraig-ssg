@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: MPL-2.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Proof debt
+
+Required by the estate Trusted-Base Reduction Policy
+(`hyperpolymath/standards`, `docs/TRUSTED-BASE-REDUCTION-POLICY.adoc`) and
+checked in CI by the `trusted-base` job. The status of every obligation is in
+the link:../EXPLAINME.adoc#proof-ledger[proof ledger].
+
+== (a) Discharged in this repo
+
+* (none — ddraig has no escape hatches: no `believe_me`, `really_believe_me`,
+  `assert_total`, top-level `partial`, `%default partial` or holes.)
+
+== (b) Budgeted — tested with refutation budget
+
+* (none)
+
+== (c) Necessary axiom
+
+* (none — no postulates or axioms.)
+
+== (d) DEBT — actively to be closed
+
+These are scope limits of the proofs rather than escape hatches. Each is
+stated in the proof ledger's trust-boundary column.
+
+* `Attest.idr` — whole-page accessibility (page `lang`, `<main>` landmark,
+  the template's own headings)
+  ** *Owner*: @hyperpolymath
+  ** *Plan*: once templates are typed (work package 1, milestone 2), certify
+     the rendered page rather than the content tree, so the template's
+     structure is inside the witness.
+  ** *Deadline*: INDEFINITE: dependent on work package 1, milestone 2.
+
+* `Attest.idr` / `Ddraig.idr` — raw HTML blocks are not inspected
+  ** *Owner*: @hyperpolymath
+  ** *Plan*: replace the hero/card/badge uses of raw HTML with typed
+     constructs (shortcodes, work package 1, milestone 4), after which raw
+     blocks can be refused by the certifier. Until then they are counted per
+     page in the attestation file.
+  ** *Deadline*: INDEFINITE: dependent on work package 1, milestone 4.
+
+* `Html.idr` — tag and attribute names are escaped but not validated
+  ** *Owner*: @hyperpolymath
+  ** *Plan*: index `Elem` and `Void` by a closed type of HTML element names.
+  ** *Deadline*: INDEFINITE: not scheduled.
+
+* `State.idr`, `Toml.idr` — the parsers are `covering`, not total
+  ** *Owner*: @hyperpolymath
+  ** *Plan*: restructure `collectKeys` to recurse on a structurally smaller
+     list, then drop the `covering` annotations.
+  ** *Deadline*: INDEFINITE: not scheduled.

@@ -30,7 +30,8 @@ toc::[]
   inline code, links, images, blockquotes, ordered + unordered + nested lists,
   pipe tables (with `<th scope="col">`), fenced code blocks with a language
   class, horizontal rules, and *raw-HTML passthrough* for hero/card/badge
-  markup.
+  markup. Every image needs alt text; a purely decorative one is marked
+  `![](divider.png){.decorative}`.
 * *Templating* — file-based layouts (`templates/<layout>.html`), partials
   (`{{> name}}` from `templates/partials/`), a `{{toc}}` table of contents,
   a `{{root}}` path prefix for root-relative links (see `base-url` below),
@@ -47,12 +48,15 @@ toc::[]
   See link:ACCESSIBILITY-CHECKLIST.adoc[ACCESSIBILITY-CHECKLIST.adoc] for the
   engine-owned vs author-owned success criteria.
 * *Proof-carrying accessibility (O3)* — every page is run through a *total*
-  decision (`Attest.idr`) for the machine-decidable content-tree criteria
-  (exactly one `<h1>`, non-skipping headings; alt-presence is already a type
-  invariant). The build *fails* if any page is un-attestable, and emits a
+  decision (`Attest.idr`) for the machine-decidable content-tree criteria:
+  exactly one `<h1>`, non-skipping headings, and alt text on every image (an
+  image without alt is a located build error, `DDR0801`, unless marked
+  `{.decorative}`). The build *fails* if any page is un-attestable, and emits a
   per-page certificate at `/.well-known/accessibility-attestation.json`. A
-  certified page carries an *echo witness* that its output is the render of an
-  accessible source — see link:ARCHITECTURE.adoc[ARCHITECTURE.adoc] (O3).
+  certified page carries an *echo witness* that its output is the render of a
+  source satisfying those criteria. Raw HTML blocks are passed through but not
+  inspected; the certificate counts them for each page — see
+  link:ARCHITECTURE.adoc[ARCHITECTURE.adoc] (O3).
 
 == Architecture
 
@@ -64,15 +68,26 @@ the three proof obligations, and — importantly — the precise scope of what
 link:ARCHITECTURE.adoc[ARCHITECTURE.adoc].
 
 The first piece of that proof surface is `Html.idr`: a typed, correct-by-
-construction HTML core whose `render` is *total* and in which an image node
-cannot be constructed without non-empty alt text (WCAG 1.1.1 presence becomes
-an invariant of the AST). It is type-checked in CI on every push.
+construction HTML core whose `render` is *total* and in which an informative
+image node cannot be constructed without non-blank alt text (WCAG 1.1.1
+presence becomes an invariant of the AST; the explicit forms of an image
+without alt fail certification). It is type-checked in CI on every push.
+
+Every proof obligation, its status and what it does not cover is listed in
+the link:EXPLAINME.adoc#proof-ledger[proof ledger]; open proof debt is in
+link:docs/proof-debt.adoc[docs/proof-debt.adoc].
+
+[cols="1,3"]
+|===
+| Proofs | link:EXPLAINME.adoc#proof-ledger[7 proven of 11; 2 tested-only, 1 argued, 1 open]
+|===
 
 The engine's Markdown rendering now flows through this core — both inline
 content and *block structure* (headings, paragraphs, lists, blockquotes,
 tables, fenced code, thematic breaks) are parsed into typed `Html` nodes and
-emitted by the total `render`. So every image carries alt text and every block
-is well-formed by construction (matching open/close tags, valid nesting). Only
+emitted by the total `render`. So every image carries alt text, is explicitly
+decorative, or stops the build, and every block is well-formed by
+construction (matching open/close tags, valid nesting). Only
 the document template/layout is still string-based.
 
 == Build

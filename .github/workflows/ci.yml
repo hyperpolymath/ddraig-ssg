@@ -54,6 +54,25 @@ jobs:
         # Any change to ddraig's output must arrive with its diff to
         # tests/golden/; regenerate with `sh tests/golden.sh --update`.
         run: sh tests/golden.sh
+  trusted-base:
+    # Estate Trusted-Base Reduction Policy: every soundness-relevant escape
+    # hatch (believe_me, assert_total, partial, ...) must be annotated and
+    # listed in docs/proof-debt.adoc. Runs only standards' checker, at a pinned
+    # commit, rather than the whole governance-reusable.yml.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          path: caller
+      - name: Checkout the estate standards (checker script)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: hyperpolymath/standards
+          ref: 9bdf864cc7f2c8e24b4df84bf00d04158eee3ad5
+          path: standards
+      - name: Check escape hatches against docs/proof-debt.adoc
+        run: bash standards/scripts/check-trusted-base.sh caller
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15

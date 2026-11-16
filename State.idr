@@ -19,7 +19,7 @@ module State
 import Data.List
 import Data.String
 
-%default covering
+%default total
 
 -- ============================================================================
 -- Parsed model
@@ -83,7 +83,11 @@ skipArray : List String -> List String
 skipArray [] = []
 skipArray (l :: ls) = if trim l == "]" then ls else skipArray ls
 
--- Collect (key, value) pairs until the next [header] or EOF.
+-- Collect (key, value) pairs until the next [header] or EOF. `covering`, not
+-- total: it recurses on the list after `skipArray`, which shrinks it, but the
+-- checker cannot see that. The parser is the untrusted side of the boundary;
+-- O1 claims totality for `validateState`, not for parsing.
+covering
 collectKeys : List String -> (List (String, String), List String)
 collectKeys [] = ([], [])
 collectKeys (l :: ls) =
@@ -97,6 +101,7 @@ collectKeys (l :: ls) =
            in ((k, v) :: more, rest)
          Nothing => collectKeys ls
 
+covering
 parseSections : List String -> List (String, List (String, String))
 parseSections [] = []
 parseSections (l :: ls) =
@@ -105,7 +110,7 @@ parseSections (l :: ls) =
           in (sectionName (trim l), pairs) :: parseSections rest
      else parseSections ls
 
-export
+export covering
 parseState : String -> StateDoc
 parseState content = MkStateDoc (parseSections (lines content))
 
