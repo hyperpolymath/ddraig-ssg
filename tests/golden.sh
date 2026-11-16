@@ -102,6 +102,8 @@ run_case config-broken          "$D" build fixtures/config-broken out
 run_case validate-config-broken "$D" validate-config fixtures/config-broken/ddraig.toml
 run_case validate-config-ok     "$D" validate-config fixtures/config/ddraig.toml
 run_case validate-config-missing "$D" validate-config no-such.toml
+run_case validate-config-nickel  "$D" validate-config fixtures/config-nickel/ddraig.toml
+run_case toml-lists              "$D" validate-config fixtures/toml-lists/ddraig.toml
 run_case template-vars          "$D" build fixtures/template-vars out
 run_case data-broken            "$D" build fixtures/data-broken out
 

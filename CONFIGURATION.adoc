@@ -123,10 +123,44 @@ than guessing:
 | bare and `"quoted"` keys | dotted keys `a.b = 1`: a `[a]` table
 | `"basic strings"` with escapes, `'literal strings'` | floats: a string or a whole number
 | integers, `true`, `false` | dates and times: a string, `"2026-06-22"`
-| one-line lists `[1, "two"]` | lists over several lines: one line
+| lists `[1, "two"]`, also over several lines with comments | hexadecimal, octal and binary numbers: decimal
 |===
 
 Each key may appear once per table, and each `[table]` once.
+
+== Generating ddraig.toml from Nickel or Dhall
+
+ddraig reads TOML only, and never runs a configuration language itself (see
+"Design decisions"). To write a configuration in Nickel or Dhall, for types,
+contracts or reuse, export it to TOML before building:
+
+[source,bash]
+----
+nickel export --format toml site.ncl > ddraig.toml
+----
+
+A record with a field for each table works; a list of records becomes
+`[[menus.main]]` entries:
+
+[source]
+----
+{
+  site = { title = "Ddraig", base_url = "https://hyperpolymath.github.io/ddraig-ssg" },
+  menus = { main = [ { name = "Home", url = "/" }, { name = "About", url = "/about.html" } ] },
+  extra = { github = "https://github.com/hyperpolymath/ddraig-ssg" },
+}
+----
+
+ddraig then checks the exported file as usual, and its messages point at
+lines of `ddraig.toml`. `tests/fixtures/config-nickel/` holds a Nickel source
+and its export (Nickel 1.18.0), which CI checks with `validate-config`; CI does
+not run Nickel itself.
+
+Dhall's `dhall-to-toml` (from the `dhall-toml` package) does the same job:
+`dhall-to-toml < site.dhall > ddraig.toml`. That route has not been tested.
+
+Nickel and Dhall export JSON too. ddraig does not read JSON yet; reading
+`data/*.json` is a likely next step if sites need it.
 
 == How it is checked
 
@@ -162,3 +196,8 @@ What is tested, in `tests/golden.sh`:
   use another address without editing the file.
 * *Errors before output.* Configuration, data and templates are all checked
   before any page is written, so a broken site never leaves half-built output.
+* *No embedded configuration languages.* KYAML, Dhall or Nickel inside ddraig
+  would mean another parser, or an evaluator, inside the build, with nothing
+  ddraig could check. Configuration stays plain data: easy to validate
+  totally, and to hash for incremental builds. Programmable configuration is
+  supported by exporting to TOML (above).

@@ -167,8 +167,8 @@ explanation TomlUnsupported = MkExplanation
   [ "ddraig reads a subset of TOML, listed in CONFIGURATION.adoc, and reports"
   , "anything else rather than guessing. Not supported: floating-point numbers,"
   , "dates and times (write them as strings: \"2026-06-22\"), multi-line strings,"
-  , "arrays that span several lines, inline tables { ... }, and dotted keys"
-  , "(a.b = 1; use a [a] table header instead)."
+  , "inline tables { ... }, and dotted keys (a.b = 1; use a [a] table header"
+  , "instead). Lists may span several lines."
   ]
 explanation TomlDuplicate = MkExplanation
   "a key or a table is defined twice"

@@ -90,12 +90,12 @@ error[DDR0102]: dates and times are not supported
    |
    = help: write it as a string: "2026-06-22"
 
-error[DDR0102]: lists that span several lines are not supported
+error[DDR0101]: unclosed list
   --> fixtures/config-broken/ddraig.toml:26:8
    |
 26 | tags = ["a",
-   |        ^ this list is not closed on this line
+   |        ^ this list is never closed
    |
-   = help: write the whole list on one line: tags = ["a", "b"]
+   = help: close it with ]
 
 ddraig: build stopped: 12 errors
