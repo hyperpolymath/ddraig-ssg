@@ -3,7 +3,7 @@
 = Proof debt
 
 Required by the estate Trusted-Base Reduction Policy
-(`hyperpolymath/standards`, `docs/TRUSTED-BASE-REDUCTION-POLICY.adoc`) and
+(`metadatastician/standards`, `docs/TRUSTED-BASE-REDUCTION-POLICY.adoc`) and
 checked in CI by the `trusted-base` job. The status of every obligation is in
 the link:../EXPLAINME.adoc#proof-ledger[proof ledger].
 

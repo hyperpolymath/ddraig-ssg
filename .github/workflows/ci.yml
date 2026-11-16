@@ -68,7 +68,7 @@ jobs:
       - name: Checkout the estate standards (checker script)
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
-          repository: hyperpolymath/standards
+          repository: metadatastician/standards
           ref: 9bdf864cc7f2c8e24b4df84bf00d04158eee3ad5
           path: standards
       - name: Check escape hatches against docs/proof-debt.adoc
