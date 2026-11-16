@@ -221,13 +221,13 @@ The `trusted-base` CI job checks for escape hatches.
 
 | An image without alt is reported as `DDR0801` at its line and column
 | `tested-only`
-| `sh tests/golden.sh` (case `images-missing-alt`, 3 images)
+| `sh tests/golden.sh` (case `images-missing-alt`)
 | `Ddraig.idr:missingAltDiags`
 | The position is found by searching the source text; an image whose `](src)` cannot be found is reported against the file only.
 
 | Build output is byte-identical to `tests/golden/`
 | `tested-only`
-| `sh tests/golden.sh` (81 files)
+| `sh tests/golden.sh` (every file under `tests/golden/`)
 | `tests/golden/`
 | Covers the recorded example and fixture sites and error cases only.
 

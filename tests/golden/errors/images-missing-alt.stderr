@@ -21,3 +21,11 @@ error[DDR0801]: image "b.png" has no alt text
    |                                  ^^^^^^^^^^ no alt text
    |
    = help: describe the image inside the brackets, or add {.decorative} straight after it if it is purely decorative
+
+error[DDR0801]: image "logo.png" has no alt text
+  --> fixtures/images/index.md:24:36
+   |
+24 | The same logo, alt text forgotten: ![](logo.png)
+   |                                    ^^^^^^^^^^^^^ no alt text
+   |
+   = help: describe the image inside the brackets, or add {.decorative} straight after it if it is purely decorative

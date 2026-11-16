@@ -4,6 +4,7 @@ Found 1 markdown file(s).
     a11y: image has no alt text: chart.png (describe it, or mark a purely decorative image with {.decorative})
     a11y: image has no alt text: a.png (describe it, or mark a purely decorative image with {.decorative})
     a11y: image has no alt text: b.png (describe it, or mark a purely decorative image with {.decorative})
+    a11y: image has no alt text: logo.png (describe it, or mark a purely decorative image with {.decorative})
   + assets/style.css (default AAA theme)
   + sitemap.xml
   + feed.xml
@@ -14,3 +15,4 @@ ACCESSIBILITY: 1 page(s) failed certification:
     - image has no alt text: chart.png (describe it, or mark a purely decorative image with {.decorative})
     - image has no alt text: a.png (describe it, or mark a purely decorative image with {.decorative})
     - image has no alt text: b.png (describe it, or mark a purely decorative image with {.decorative})
+    - image has no alt text: logo.png (describe it, or mark a purely decorative image with {.decorative})

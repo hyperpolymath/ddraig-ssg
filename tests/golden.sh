@@ -78,6 +78,7 @@ build_site() {
 # base URL from ddraig.toml, then the command line's overriding it
 build_site config          fixtures/config
 build_site config-cli-base fixtures/config https://cli.example
+build_site braces          fixtures/braces
 
 # run_case NAME COMMAND...: run COMMAND in the scratch directory and record it.
 run_case() {

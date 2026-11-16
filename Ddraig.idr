@@ -92,6 +92,17 @@ strEscape s = concat (map esc (unpack s))
     esc '"' = "&quot;"
     esc c = singleton c
 
+-- A value going into a template: HTML-escaped, and with `{` written as the
+-- character reference `&#123;` (which a browser shows as `{`). Template
+-- placeholders are filled one after another, so a raw `{{toc}}` inside a
+-- title would otherwise be expanded by a later step, and stripPlaceholders
+-- would delete `{{...}}` text from titles and menu names.
+braceSafe : String -> String
+braceSafe s = concat (map (\c => if c == '{' then "&#123;" else singleton c) (unpack s))
+
+tplEscape : String -> String
+tplEscape = braceSafe . strEscape
+
 -- Count leading spaces (treat a tab as two spaces for indentation purposes).
 leadingIndent : String -> Nat
 leadingIndent s = go (unpack s) 0
@@ -238,11 +249,11 @@ inlineNodes text = go (unpack text) []
     -- the trust boundary: untrusted alt text enters via the total `mkAlt`.
     imageNode : (alt : String) -> (url : String) -> (decorative : Bool) -> Html
     imageNode alt url decorative =
-      case mkAlt alt of
-        Just a  => Img url a            -- informative: proof-carrying non-blank alt
-        Nothing => if decorative
-                      then DecorativeImg url  -- marked {.decorative}: explicit alt=""
-                      else UnlabelledImg url  -- no alt, no marker: an error, not a guess
+      if decorative then DecorativeImg url  -- marked {.decorative}: explicit alt="", even
+                                            -- over alt text (the marker is the explicit choice)
+      else case mkAlt alt of
+             Just a  => Img url a           -- informative: proof-carrying non-blank alt
+             Nothing => UnlabelledImg url   -- no alt, no marker: an error, not a guess
     -- `{.decorative}` straight after an image marks it decorative.
     decorativeMark : List Char
     decorativeMark = unpack "{.decorative}"
@@ -797,16 +808,16 @@ export
 applyTemplate : String -> Frontmatter -> PageVars -> String -> String -> String
 applyTemplate template fm pv htmlContent tocHtml =
   let brand = if fm.brand == "" then fm.title else fm.brand
-      t1 = strReplace template "{{title}}" (strEscape fm.title)
-      t2 = strReplace t1 "{{date}}" (strEscape fm.date)
-      t3 = strReplace t2 "{{description}}" (strEscape fm.description)
-      t4 = strReplace t3 "{{brand}}" (strEscape brand)
-      tc = strReplace t4 "{{canonical}}" (strEscape pv.pvCanonical)
-      tr = strReplace tc "{{root}}" (strEscape pv.pvRoot)
-      tl = strReplace tr "{{lang}}" (strEscape pv.pvLang)
-      ta = strReplace tl "{{author}}" (strEscape pv.pvAuthor)
-      tm = strReplace ta "{{menu}}" pv.pvMenu
-      t5 = strReplace tm "{{toc}}" tocHtml
+      t1 = strReplace template "{{title}}" (tplEscape fm.title)
+      t2 = strReplace t1 "{{date}}" (tplEscape fm.date)
+      t3 = strReplace t2 "{{description}}" (tplEscape fm.description)
+      t4 = strReplace t3 "{{brand}}" (tplEscape brand)
+      tc = strReplace t4 "{{canonical}}" (tplEscape pv.pvCanonical)
+      tr = strReplace tc "{{root}}" (tplEscape pv.pvRoot)
+      tl = strReplace tr "{{lang}}" (tplEscape pv.pvLang)
+      ta = strReplace tl "{{author}}" (tplEscape pv.pvAuthor)
+      tm = strReplace ta "{{menu}}" (braceSafe pv.pvMenu)
+      t5 = strReplace tm "{{toc}}" (braceSafe tocHtml)
       -- strip any remaining unfilled placeholders BEFORE injecting content,
       -- so author content (which may legitimately contain braces) is untouched
       t6 = stripPlaceholders t5
@@ -949,7 +960,7 @@ loadTemplate src vars layout = do
   r <- readFile path
   case r of
     Right c => do full <- resolvePartials src c
-                  pure (fst (resolveVars strEscape vars path full))
+                  pure (fst (resolveVars tplEscape vars path full))
     Left _ => pure defTemplate
 
 -- change ".md"/".markdown" extension to ".html"
@@ -1023,14 +1034,14 @@ record PageResult where
 
 -- DDR0801 for each image without alt text, in document order. The parser has
 -- already decided which images lack alt (so an image inside code is never
--- reported); this only finds where to point, by searching the page source
--- for each image's `](src)` in turn. One that cannot be found is reported
--- against the file without a position.
+-- reported); this only finds where to point, by searching the page source for
+-- each one's `![<blank>](src)` in turn, outside front matter and fenced code.
+-- A described image with the same src is not matched. One that cannot be
+-- found is reported against the file without a position. (Carrying source
+-- positions through the Markdown parser would make this exact; see
+-- docs/proof-debt.adoc.)
 missingAltDiags : (file : String) -> (content : String) -> List String -> List Diagnostic
-missingAltDiags file content srcs =
-  case lines content of
-    []        => map (\s => inFile file (diag s)) srcs
-    (l :: ls) => go 1 0 (unpack l) ls srcs
+missingAltDiags file content srcs = start (lines content) srcs
   where
     diag : String -> Diagnostic
     diag src = withHelp "describe the image inside the brackets, or add {.decorative} straight after it if it is purely decorative" $
@@ -1041,28 +1052,54 @@ missingAltDiags file content srcs =
       else case hay of
              []          => Nothing
              (_ :: rest) => findFrom needle rest (S i)
-    -- index of the last "![" in a line prefix (0 if none)
-    lastBang : List Char -> Nat
-    lastBang cs = goB 0 cs 0
+    -- index of the last "![" in a line prefix
+    lastBang : List Char -> Maybe Nat
+    lastBang cs = goB 0 cs Nothing
       where
-        goB : Nat -> List Char -> Nat -> Nat
+        goB : Nat -> List Char -> Maybe Nat -> Maybe Nat
         goB _ [] best = best
-        goB i ('!' :: '[' :: rest) _ = goB (S i) ('[' :: rest) i
+        goB i ('!' :: '[' :: rest) _ = goB (S i) ('[' :: rest) (Just i)
         goB i (_ :: rest) best = goB (S i) rest best
-    -- n: line number (1-based); off: column offset of `cs` within the line
-    go : Nat -> Nat -> List Char -> List String -> List String -> List Diagnostic
-    go _ _ _ _ [] = []
-    go n off cs ls (s :: ss) =
-      let needle = unpack ("](" ++ s ++ ")") in
-      case findFrom needle cs 0 of
-        Just i =>
-          let bang = lastBang (take i cs)
-              endI = i + length needle in
-          atPos file n (S (off + bang)) (endI `minus` bang) "no alt text" (diag s)
-            :: go n (off + endI) (drop endI cs) ls ss
-        Nothing => case ls of
-          []          => map (\x => inFile file (diag x)) (s :: ss)
-          (l :: rest) => go (S n) 0 (unpack l) rest (s :: ss)
+    isFence : String -> Bool
+    isFence l = strHasPrefix "```" (trim l) || strHasPrefix "~~~" (trim l)
+    unfound : List String -> List Diagnostic
+    unfound = map (\x => inFile file (diag x))
+    -- Next searchable line: skips fenced code blocks.
+    -- n: line number of the line being searched (1-based)
+    mutual
+      next : Nat -> Bool -> List String -> List String -> List Diagnostic
+      next _ _ _ [] = []
+      next _ _ [] ss = unfound ss
+      next n fence (l :: ls) ss =
+        if isFence l then next (S n) (not fence) ls ss
+        else if fence then next (S n) fence ls ss
+        else go n 0 (unpack l) ls ss
+      -- off: column offset of `cs` within line n
+      go : Nat -> Nat -> List Char -> List String -> List String -> List Diagnostic
+      go _ _ _ _ [] = []
+      go n off cs ls (s :: ss) =
+        let needle = unpack ("](" ++ s ++ ")") in
+        case findFrom needle cs 0 of
+          Nothing => next (S n) False ls (s :: ss)
+          Just i =>
+            let endI = i + length needle in
+            case lastBang (take i cs) of
+              Just bang =>
+                if trim (pack (drop (bang + 2) (take i cs))) == ""
+                   then atPos file n (S (off + bang)) (endI `minus` bang) "no alt text" (diag s)
+                          :: go n (off + endI) (drop endI cs) ls ss
+                   else go n (off + endI) (drop endI cs) ls (s :: ss)   -- described: not this one
+              Nothing => go n (off + endI) (drop endI cs) ls (s :: ss)
+    -- Skip front matter (a leading "---" block, after any blank or comment lines).
+    start : List String -> List String -> List Diagnostic
+    start ls ss = case break (\l => trim l == "---") ls of
+      (pre, (_ :: rest)) =>
+        if all (\l => trim l == "" || strHasPrefix "<!--" (trim l)) pre
+           then case break (\l => trim l == "---") rest of
+                  (fmLines, (_ :: body)) => next (length pre + length fmLines + 3) False body ss
+                  _ => next 1 False ls ss
+           else next 1 False ls ss
+      _ => next 1 False ls ss
 
 -- Build one markdown file. Nothing only when the file is a draft or unreadable.
 buildOne : HasIO io => BuildCtx -> (rel : String) -> io (Maybe PageResult)
@@ -1419,7 +1456,7 @@ checkTemplates src vars = do
              let path = joinPath dir rel
              r <- readFile path
              pure (case r of
-                     Right text => snd (resolveVars strEscape vars path text)
+                     Right text => snd (resolveVars tplEscape vars path text)
                      Left _     => []))
            (filter (strHasSuffix ".html") rels)
   pure (concat found)
