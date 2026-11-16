@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: MPL-2.0
+[site]
+title = "Template Variables"
+
+[extra]
+github = "https://github.com/example"
+tags = ["idris", "ssg"]

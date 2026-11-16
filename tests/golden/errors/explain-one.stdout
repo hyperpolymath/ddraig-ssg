@@ -1,0 +1,7 @@
+DDR0002: the source directory does not exist, or is not a directory
+
+`ddraig build <src> <out>` reads pages from <src>, which must be an existing
+directory. A relative path is resolved from the directory you run ddraig in.
+
+Check the spelling, and that you are in the directory you expect. If <src>
+names a file, give the directory that contains it instead.

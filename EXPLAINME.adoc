@@ -1,0 +1,245 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Ddraig — EXPLAINME
+:toc: preamble
+:icons: font
+
+The receipts for README.adoc: where each claim is implemented, what it does
+not cover, and the status of every proof obligation, for anyone who wants to
+check rather than trust.
+
+== Claim-to-implementation map
+
+=== Site configuration
+
+[quote, README.adoc]
+____
+an optional `ddraig.toml` (title, base URL, language, description, author,
+menus, `[extra]` values) and `data/*.toml` files for templates. Front matter
+overrides site values. Checked by a *total* decision before anything is
+written; every mistake is reported with its line and column.
+____
+
+How this is implemented::
+`link:Toml.idr[]` parses TOML into located tables; `link:Config.idr[]`
+(`%default total`) decides validity in `validateConfig`, returning every
+problem as a located `Diagnostic` (`link:Diagnostic.idr[]`). The build stops
+before writing when there is any problem (`Ddraig.idr`, `failBuild`).
+
+Caveat::
+The TOML parser is `covering`, not total, and reads a documented subset of
+TOML (link:CONFIGURATION.adoc[]); anything else is reported, not guessed.
+
+=== Proof-carrying accessibility (O3)
+
+[quote, README.adoc]
+____
+every page is run through a *total* decision (`Attest.idr`) for the
+machine-decidable content-tree criteria: exactly one `<h1>`, non-skipping
+headings, and alt text on every image (an image without alt is a located
+build error, `DDR0801`, unless marked `{.decorative}`).
+____
+
+How this is implemented::
+`link:Attest.idr[]` defines the three predicates as decidable propositions
+and `certify` returns either the violations or an `Attested` value whose
+erased `echo` field proves `output = renderDoc source.blocks` for a source
+carrying the (erased) accessibility witness. The Markdown parser
+(`Ddraig.idr`, `inlineNodes`) produces `UnlabelledImg` for an image with no
+alt and no `{.decorative}` marker, so the omission is represented rather than
+guessed; `missingAltDiags` locates it for `DDR0801`.
+
+Caveat::
+Raw HTML blocks are passed through and not inspected; the attestation file
+records how many each page has. Template-owned criteria (page `lang`,
+`<main>`, contrast, the template's headings) are not covered yet. See the
+<<proof-ledger>> and link:docs/proof-debt.adoc[].
+
+=== Typed HTML core
+
+[quote, README.adoc]
+____
+a typed, correct-by-construction HTML core whose `render` is *total* and in
+which an informative image node cannot be constructed without non-blank alt
+text
+____
+
+How this is implemented::
+`link:Html.idr[]` (`%default total`): `render`, `renderForest` and
+`renderDoc` are structurally recursive. `MkAlt` requires an erased
+`So (trim text /= "")`, and `mkAlt` is the total boundary check for alt text
+from untrusted input.
+
+Caveat::
+Tag and attribute names are arbitrary strings: they are escaped but not
+validated as HTML names, and `Raw` content is emitted verbatim. Well-formedness
+is about the structure the constructors produce.
+
+=== Accessible default theme
+
+[quote, README.adoc]
+____
+the default theme is *WCAG 2.2 AAA-capable*: contrast- verified ≥ 7:1 palette
+(light + dark)
+____
+
+How this is implemented::
+The stylesheet is `defaultStyle` in `link:Ddraig.idr[]`; the measured ratios
+are recorded in link:ACCESSIBILITY-CHECKLIST.adoc[].
+
+Caveat::
+The ratios were computed by hand and are not re-checked by CI, so the ledger
+records this as `argued`.
+
+== Dogfooded Across The Account
+
+[cols="1,2,2", options="header"]
+|===
+| Technology / Pattern | Used here | Also used in
+
+| Idris 2 total functions as proofs
+| The typed HTML core, the validators and the attestation
+| link:https://github.com/hyperpolymath/proven[proven],
+  link:https://github.com/hyperpolymath/typed-wasm[typed-wasm]
+
+| Echo types
+| `Attested`: rendered output paired with the witness that it renders an
+  accessible source
+| link:https://github.com/hyperpolymath/echo-types[echo-types]
+
+| `docs/proof-debt.adoc` under the trusted-base policy
+| Proof debt and scope limits, checked by the `trusted-base` CI job
+| link:https://github.com/hyperpolymath/vcl-ut[vcl-ut],
+  link:https://github.com/hyperpolymath/typed-wasm[typed-wasm]
+
+| Proven/practical SSG split
+| The proof-carrying end of the stack
+| link:https://github.com/hyperpolymath/casket-ssg[casket-ssg] (the practical end)
+|===
+
+== Known gaps
+
+[CAUTION]
+====
+Whole-page accessibility: README's O3 claim covers the content tree only. The
+template's `lang`, `<main>` landmark and its own headings are not certified
+until the typed template (work package 1, milestone 2). Listed as `open` in
+the <<proof-ledger>>.
+====
+
+[CAUTION]
+====
+Raw HTML passthrough is outside the certificate. It is counted, not inspected.
+====
+
+[CAUTION]
+====
+The "WCAG 2.2 AAA-capable" palette's contrast ratios are hand-computed, not
+re-checked by CI.
+====
+
+[[evidence-index]]
+== Evidence Index
+
+[cols="2,3", options="header"]
+|===
+| Path | Proves or tests
+
+| `Html.idr`
+| `render` total; non-blank alt by construction (type-checked in CI)
+
+| `State.idr`
+| `validateState` is a total decision (O1)
+
+| `Attest.idr`
+| O3 decision, erased echo witness, and Refl checks of the detectors
+
+| `Config.idr`, `Diagnostic.idr`
+| Total configuration decision; every diagnostic code has an explanation
+
+| `tests/golden.sh`, `tests/golden/`
+| Byte-identical output for the example and fixture sites and every error case
+
+| `tests/golden/errors/images-missing-alt.*`
+| `DDR0801` locations, including two images on one line and an image in code
+|===
+
+[[proof-ledger]]
+== Proof Ledger
+
+Checker for every `proven` row: Idris 2 0.8.0 (commit `6ca00e72`, in the
+digest-pinned `ghcr.io/stefan-hoeck/idris2-pack` image used by `ci.yml`),
+`idris2 --check <file>`, with no extra flags; each module is
+`%default total`, with no `believe_me`, `assert_total` or `partial`.
+The `trusted-base` CI job checks for escape hatches.
+
+[cols="3,1,2,2,3", options="header"]
+|===
+| Obligation | Status | Checker (version, flags) | Where | Trust boundary
+
+| O1: `validateState` decides every parsed STATE descriptile (total)
+| `proven`
+| `idris2 --check State.idr`
+| `State.idr:validateState`
+| The parser (`parseState`, `parseSections`, `collectKeys`) is `covering`, not total. The schema is a transcription of STATE.a2ml, not proven to match it.
+
+| O2: `render`, `renderForest` and `renderDoc` are total
+| `proven`
+| `idris2 --check Html.idr`
+| `Html.idr:render`
+| Tag and attribute names are escaped, not validated; `Raw` is emitted verbatim.
+
+| O2: an `Img` cannot be built without non-blank alt; `mkAlt` yields an `Alt` only for non-blank input
+| `proven`
+| `idris2 --check Html.idr`
+| `Html.idr:Alt`, `Html.idr:mkAlt`
+| Alt *meaningfulness* is author-owned. The explicit no-alt forms are handled by O3.
+
+| O3: `certify` yields an `Attested` only for content satisfying one-h1, heading-no-skip and images-labelled, and its output is definitionally `renderDoc` of that content
+| `proven`
+| `idris2 --check Attest.idr`
+| `Attest.idr:certify`, `Attest.idr:attest`
+| Typed content tree only: raw HTML blocks are not inspected (counted per page); template-owned criteria are not covered.
+
+| O3 detectors on fixed inputs: an element-built `<img>` without alt is caught, one with alt is not, upper-case `<H1>` is counted, nested raw blocks are counted
+| `proven`
+| `idris2 --check Attest.idr`
+| `Attest.idr:elemImgCaught`, `elemImgWithAltOk`, `upperH1Counted`, `rawCounted`
+| Specific inputs only (equalities checked by evaluation).
+
+| Every diagnostic code has an identifier and an explanation; rendering is total
+| `proven`
+| `idris2 --check Diagnostic.idr`
+| `Diagnostic.idr:codeId`, `Diagnostic.idr:explanation`
+| Identifier uniqueness and round-tripping are tested (`ddraig test-diagnostics`), not proven.
+
+| `validateConfig` decides every parsed `ddraig.toml` (total)
+| `proven`
+| `idris2 --check Config.idr`
+| `Config.idr:validateConfig`
+| TOML parsing (`Toml.idr`) is `covering`.
+
+| An image without alt is reported as `DDR0801` at its line and column
+| `tested-only`
+| `sh tests/golden.sh` (case `images-missing-alt`)
+| `Ddraig.idr:missingAltDiags`
+| The position is found by searching the source text; an image whose `](src)` cannot be found is reported against the file only.
+
+| Build output is byte-identical to `tests/golden/`
+| `tested-only`
+| `sh tests/golden.sh` (every file under `tests/golden/`)
+| `tests/golden/`
+| Covers the recorded example and fixture sites and error cases only.
+
+| The default palette meets ≥ 7:1 contrast (light and dark)
+| `argued`
+| -
+| `ACCESSIBILITY-CHECKLIST.adoc`
+| Ratios computed by hand; not re-checked by CI.
+
+| Whole-page accessibility: page `lang`, the `<main>` landmark and the template's own headings
+| `open`
+| -
+| -
+| Needs the typed template (work package 1, milestone 2). See `docs/proof-debt.adoc` (d).
+|===

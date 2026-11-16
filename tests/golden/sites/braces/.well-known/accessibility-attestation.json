@@ -1,0 +1,9 @@
+{
+  "generator": "Ddraig SSG 0.2.0",
+  "generated": "2026-06-22T00:00:00Z",
+  "scope": "decidable WCAG subset (typed content tree; raw HTML blocks are not inspected)",
+  "predicates": ["one-h1", "heading-no-skip", "images-labelled", "alt-non-blank-by-construction"],
+  "pages": [
+    {"page": "/index.html", "certified": true, "unchecked_raw_html_blocks": 0, "violations": []}
+  ]
+}

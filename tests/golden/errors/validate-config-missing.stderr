@@ -1,0 +1,4 @@
+error[DDR0109]: cannot read "no-such.toml"
+  = help: check the path; `ddraig build` reads ddraig.toml from the source directory
+
+ddraig: cannot check no-such.toml: 1 error

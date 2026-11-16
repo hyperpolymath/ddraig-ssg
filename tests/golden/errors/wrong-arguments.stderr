@@ -1,0 +1,2 @@
+error[DDR0004]: `ddraig build` takes 2 or 3 arguments, but was given 1
+  = help: usage: ddraig build <src> <out> [base-url]

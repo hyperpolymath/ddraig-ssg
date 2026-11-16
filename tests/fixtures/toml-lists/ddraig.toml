@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MPL-2.0
+# Lists that span lines and hold comments are read; one item here is broken.
+[site]
+title = "Lists"
+
+[extra]
+tags = [
+  "idris",   # a comment inside a list
+  "ssg",
+]
+nested = [[1, 2], [3]]
+broken = [
+  "fine",
+  bad-item,
+]
+after = "still checked"

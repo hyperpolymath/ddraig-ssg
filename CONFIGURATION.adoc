@@ -1,0 +1,203 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Site configuration
+:toc: macro
+
+A site can have a configuration file, `ddraig.toml`, in its source directory,
+and data files in `data/`. Both are optional: without them ddraig behaves as it
+always has.
+
+toc::[]
+
+== Example
+
+[source,toml]
+----
+[site]
+title = "Ddraig"
+base_url = "https://hyperpolymath.github.io/ddraig-ssg"
+language = "en"
+description = "A dependently-typed static-site generator"
+author = "Jonathan D.A. Jewell"
+
+[[menus.main]]            # one [[menus.main]] per link, in order
+name = "Home"
+url = "/"
+
+[[menus.main]]
+name = "About"
+url = "/about.html"
+
+[extra]                   # values of your own, for templates
+github = "https://github.com/hyperpolymath/ddraig-ssg"
+----
+
+Check a configuration without building: `ddraig validate-config ddraig.toml`.
+`ddraig build` makes the same checks before writing anything.
+
+== Tables and keys
+
+[cols="1,1,3",options="header"]
+|===
+| Table | Key | Meaning
+| `[site]` | `title` | The site's name: the brand in the header, `og:site_name`, and the feed's title.
+| | `base_url` | Absolute `http://` or `https://` address of the site. Makes the sitemap, feed and canonical URLs absolute; its path (e.g. `/ddraig-ssg`) prefixes links inside the site.
+| | `language` | Language tag for `<html lang>`, e.g. `en`, `cy`, `pt-BR`. Default `en`.
+| | `description` | Default `<meta name="description">` for pages without one.
+| | `author` | Default author, shown by templates that use `{{author}}`.
+| `[[menus.<name>]]` | `name`, `url` | One menu entry; both are required. The default template shows the `main` menu. A `url` starting with `/` is inside the site and gets the base URL's path in front of it; other urls are used as written.
+| `[extra]` | any | Your own values (strings, numbers, true/false, lists), for templates as `{{site.extra.<key>}}`.
+|===
+
+Every value in `[site]` and in a menu entry is a string. Any other table, an
+unknown key, or a key outside a table is an error, with a suggestion when a
+name is close to a real one.
+
+== Data files
+
+Each `data/<name>.toml` is read for templates. Any keys and `[tables]` are
+allowed. A key is used as `{{data.<name>.<key>}}`, or with table names in
+between for a key inside a table:
+
+[source,toml]
+----
+# data/team.toml
+lead = "Ada"
+
+[roles]
+editor = "Grace"
+----
+
+gives `{{data.team.lead}}` and `{{data.team.roles.editor}}`. Only files
+directly in `data/` are read. Nothing in `data/` is built as a page or copied
+to the output.
+
+== Precedence
+
+A page's front matter overrides the site configuration, which overrides the
+default:
+
+[cols="1,1,1,1",options="header"]
+|===
+| Template variable | Front matter | `ddraig.toml` | Default
+| `{{brand}}` | `site:` or `brand:` | `[site] title` | the page's title
+| `{{description}}` | `description:` | `[site] description` | empty
+| `{{lang}}` | `lang:` | `[site] language` | `en`
+| `{{author}}` | `author:` | `[site] author` | empty
+| base URL | — | `[site] base_url` | none
+|===
+
+The base URL given on the command line (`ddraig build <src> <out> <base-url>`)
+overrides `base_url`. The build log says which one is in use.
+
+== Template variables
+
+Page variables, filled in for each page: `{{title}}`, `{{date}}`,
+`{{description}}`, `{{brand}}`, `{{lang}}`, `{{author}}`, `{{canonical}}`,
+`{{root}}` (the base URL's path), `{{menu}}` (the `main` menu's `<li>` items),
+`{{toc}}` and `{{content}}`.
+
+Site and data variables, filled in from `ddraig.toml` and `data/`:
+`{{site.title}}`, `{{site.base_url}}` (the base URL in use),
+`{{site.language}}`, `{{site.description}}`, `{{site.author}}`,
+`{{site.extra.<key>}}` and `{{data.<file>.<key>}}`. A `{{site...}}` or
+`{{data...}}` variable that does not exist is an error, pointing at the
+template's file, line and column, with the nearest real name as a suggestion.
+A variable that holds a list is an error too, until templates gain loops. A
+known variable with no value is shown as empty.
+
+Text values are HTML-escaped. Other unknown `{{...}}` placeholders are still
+removed silently, as before; the template engine (milestone 2) makes every
+unknown variable an error.
+
+== The TOML ddraig reads
+
+ddraig reads a subset of TOML and reports anything else (DDR0102) rather
+than guessing:
+
+[cols="1,1",options="header"]
+|===
+| Supported | Not supported, and what to write instead
+| `# comments`, blank lines | multi-line strings: one line, with `\n`
+| `[table]`, `[[array.of.tables]]`, bare names joined by dots | inline tables `{ ... }`: a `[table]`
+| bare and `"quoted"` keys | dotted keys `a.b = 1`: a `[a]` table
+| `"basic strings"` with escapes, `'literal strings'` | floats: a string or a whole number
+| integers, `true`, `false` | dates and times: a string, `"2026-06-22"`
+| lists `[1, "two"]`, also over several lines with comments | hexadecimal, octal and binary numbers: decimal
+|===
+
+Each key may appear once per table, and each `[table]` once.
+
+== Generating ddraig.toml from Nickel or Dhall
+
+ddraig reads TOML only, and never runs a configuration language itself (see
+"Design decisions"). To write a configuration in Nickel or Dhall, for types,
+contracts or reuse, export it to TOML before building:
+
+[source,bash]
+----
+nickel export --format toml site.ncl > ddraig.toml
+----
+
+A record with a field for each table works; a list of records becomes
+`[[menus.main]]` entries:
+
+[source]
+----
+{
+  site = { title = "Ddraig", base_url = "https://hyperpolymath.github.io/ddraig-ssg" },
+  menus = { main = [ { name = "Home", url = "/" }, { name = "About", url = "/about.html" } ] },
+  extra = { github = "https://github.com/hyperpolymath/ddraig-ssg" },
+}
+----
+
+ddraig then checks the exported file as usual, and its messages point at
+lines of `ddraig.toml`. `tests/fixtures/config-nickel/` holds a Nickel source
+and its export (Nickel 1.18.0), which CI checks with `validate-config`; CI does
+not run Nickel itself.
+
+Dhall's `dhall-to-toml` (from the `dhall-toml` package) does the same job:
+`dhall-to-toml < site.dhall > ddraig.toml`. That route has not been tested.
+
+Nickel and Dhall export JSON too. ddraig does not read JSON yet; reading
+`data/*.json` is a likely next step if sites need it.
+
+== How it is checked
+
+`Toml.idr` reads the text: it is the untrusted side, and records the line and
+column of every key and value. `Config.idr` decides whether the tables are a
+valid configuration with `validateConfig`, which is *total* and type-checked
+in CI, in the same way that `validateState` decides STATE descriptiles
+(ARCHITECTURE.adoc, O1). Every problem is reported at once, with its file,
+line and column; see DIAGNOSTICS.adoc for the format and the DDR01xx and
+DDR02xx codes.
+
+What is tested, in `tests/golden.sh`:
+
+* the precedence rules, on a fixture site built with the base URL from
+  `ddraig.toml` and again with one from the command line
+  (`tests/golden/sites/`);
+* a configuration with twelve different mistakes, all reported in one run;
+* unknown and list-valued template variables, in a template and a partial;
+* a data file that is not valid TOML;
+* `validate-config` on a valid, a broken and a missing file.
+
+== Design decisions
+
+* *TOML*, as the kickoff asked: it is what Zola and Hugo users know, and close
+  to the STATE descriptile format.
+* *ddraig's own reader for a subset*, not a library. Every error can point
+  at an exact line and column in the same format as every other ddraig
+  message; the build needs no new dependency; and the subset is small enough
+  to document completely. Unsupported TOML is rejected, never misread.
+* *Everything under a table.* Site settings live in `[site]` and free values
+  in `[extra]`, so a typo in a setting cannot quietly become a custom value.
+* *The command line wins* over `base_url`, so a preview or staging build can
+  use another address without editing the file.
+* *Errors before output.* Configuration, data and templates are all checked
+  before any page is written, so a broken site never leaves half-built output.
+* *No embedded configuration languages.* KYAML, Dhall or Nickel inside ddraig
+  would mean another parser, or an evaluator, inside the build, with nothing
+  ddraig could check. Configuration stays plain data: easy to validate
+  totally, and to hash for incremental builds. Programmable configuration is
+  supported by exporting to TOML (above).

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Ddraig Site</title>
+  <id>urn:ddraig:/feed.xml</id>
+  <updated>2026-06-22T00:00:00Z</updated>
+  <author><name>Ddraig Site</name></author>
+  <generator>Ddraig SSG 0.2.0</generator>
+  <entry>
+    <title>Using {{toc}} in templates</title>
+    <id>urn:ddraig:/index.html</id>
+    <link href="/index.html"/>
+    <updated>2026-06-22T00:00:00Z</updated>
+    <summary>The {{lang}} placeholder</summary>
+  </entry>
+</feed>

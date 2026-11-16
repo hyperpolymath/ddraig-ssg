@@ -1,0 +1,18 @@
+Ddraig build: fixtures/images -> out
+Found 1 markdown file(s).
+  + index.md -> index.html  [a11y FAIL]
+    a11y: image has no alt text: chart.png (describe it, or mark a purely decorative image with {.decorative})
+    a11y: image has no alt text: a.png (describe it, or mark a purely decorative image with {.decorative})
+    a11y: image has no alt text: b.png (describe it, or mark a purely decorative image with {.decorative})
+    a11y: image has no alt text: logo.png (describe it, or mark a purely decorative image with {.decorative})
+  + assets/style.css (default AAA theme)
+  + sitemap.xml
+  + feed.xml
+  + .well-known/accessibility-attestation.json
+Done. 1 page(s) built.
+ACCESSIBILITY: 1 page(s) failed certification:
+  /index.html
+    - image has no alt text: chart.png (describe it, or mark a purely decorative image with {.decorative})
+    - image has no alt text: a.png (describe it, or mark a purely decorative image with {.decorative})
+    - image has no alt text: b.png (describe it, or mark a purely decorative image with {.decorative})
+    - image has no alt text: logo.png (describe it, or mark a purely decorative image with {.decorative})

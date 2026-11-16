@@ -1,0 +1,3 @@
+error[DDR0005]: "DDR002" is not a diagnostic code
+  = help: did you mean "DDR0002"?
+  = help: run `ddraig explain` with no code to list every code

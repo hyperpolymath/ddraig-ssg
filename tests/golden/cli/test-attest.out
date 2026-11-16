@@ -1,0 +1,9 @@
+=== Test: a11y attestation (O3) ===
+OK: accessible document certified
+OK: inaccessible document rejected (2 violation(s))
+  - exactly one <h1> required (found 2)
+  - heading levels skip a level; do not jump deeper by more than one
+OK: whitespace-only alt text rejected
+OK: described and decorative images certified
+OK: image without alt rejected
+  - image has no alt text: d.png (describe it, or mark a purely decorative image with {.decorative})

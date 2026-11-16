@@ -18,6 +18,9 @@ import System.File
 import Html
 import State
 import Attest
+import Diagnostic
+import Toml
+import Config
 
 %default covering
 
@@ -39,10 +42,12 @@ record Frontmatter where
   description : String
   slug : String
   brand : String
+  lang : String     -- overrides [site] language for this page
+  author : String   -- overrides [site] author for this page
 
 export
 emptyFrontmatter : Frontmatter
-emptyFrontmatter = MkFrontmatter "" "" [] False "default" "" "" ""
+emptyFrontmatter = MkFrontmatter "" "" [] False "default" "" "" "" "" ""
 
 -- A built page, retained for sitemap/feed generation.
 public export
@@ -86,6 +91,17 @@ strEscape s = concat (map esc (unpack s))
     esc '&' = "&amp;"
     esc '"' = "&quot;"
     esc c = singleton c
+
+-- A value going into a template: HTML-escaped, and with `{` written as the
+-- character reference `&#123;` (which a browser shows as `{`). Template
+-- placeholders are filled one after another, so a raw `{{toc}}` inside a
+-- title would otherwise be expanded by a later step, and stripPlaceholders
+-- would delete `{{...}}` text from titles and menu names.
+braceSafe : String -> String
+braceSafe s = concat (map (\c => if c == '{' then "&#123;" else singleton c) (unpack s))
+
+tplEscape : String -> String
+tplEscape = braceSafe . strEscape
 
 -- Count leading spaces (treat a tab as two spaces for indentation purposes).
 leadingIndent : String -> Nat
@@ -151,6 +167,8 @@ parseFmLine line fm =
            "slug" => { slug := value } fm
            "site" => { brand := value } fm
            "brand" => { brand := value } fm
+           "lang" => { lang := value } fm
+           "author" => { author := value } fm
            "draft" => { draft := (value == "true" || value == "yes") } fm
            "tags" =>
              let tagStr = if strHasPrefix "[" value
@@ -194,8 +212,10 @@ parseFrontmatter content =
 -- rendered from there. This is the build pipeline's trust boundary in
 -- miniature: `inlineNodes` is the untrusted (covering) parser; `Html.render`
 -- is the total renderer. Every image therefore flows through `Html.mkAlt`, so
--- informative images provably carry non-empty alt text, and empty/whitespace
--- alt becomes an explicit `DecorativeImg` (alt="") rather than a silent alt="".
+-- informative images provably carry non-blank alt text. An image with no alt
+-- is decorative (alt="") only when the author says so with `{.decorative}`
+-- straight after it; otherwise it is an `UnlabelledImg`, which fails
+-- certification and is reported as DDR0801. ddraig never guesses.
 -- All inline HTML assembly now lives in the typed core, not string concat.
 -- ============================================================================
 
@@ -227,11 +247,20 @@ inlineNodes text = go (unpack text) []
                 Just (url, rest) => Just (pack txt, pack url, rest)
             _ => Nothing
     -- the trust boundary: untrusted alt text enters via the total `mkAlt`.
-    imageNode : (alt : String) -> (url : String) -> Html
-    imageNode alt url =
-      case mkAlt alt of
-        Just a  => Img url a            -- informative: proof-carrying non-empty alt
-        Nothing => DecorativeImg url    -- empty/whitespace alt: explicit alt=""
+    imageNode : (alt : String) -> (url : String) -> (decorative : Bool) -> Html
+    imageNode alt url decorative =
+      if decorative then DecorativeImg url  -- marked {.decorative}: explicit alt="", even
+                                            -- over alt text (the marker is the explicit choice)
+      else case mkAlt alt of
+             Just a  => Img url a           -- informative: proof-carrying non-blank alt
+             Nothing => UnlabelledImg url   -- no alt, no marker: an error, not a guess
+    -- `{.decorative}` straight after an image marks it decorative.
+    decorativeMark : List Char
+    decorativeMark = unpack "{.decorative}"
+    takeMark : List Char -> (Bool, List Char)
+    takeMark cs = if isPrefixOf decorativeMark cs
+                     then (True, drop (length decorativeMark) cs)
+                     else (False, cs)
     -- flush the buffered plain-text run (reversed) as one Text node.
     flush : List Char -> List Html -> List Html
     flush []  rest = rest
@@ -241,7 +270,9 @@ inlineNodes text = go (unpack text) []
     -- image: ![alt](url)
     go ('!' :: '[' :: rest) buf =
       case readLink rest of
-        Just (alt, url, after) => flush buf (imageNode alt url :: go after [])
+        Just (alt, url, after) =>
+          let (dec, after') = takeMark after in
+          flush buf (imageNode alt url dec :: go after' [])
         Nothing => go ('[' :: rest) ('!' :: buf)
     -- link: [text](url)  (link text is itself parsed for inline markup)
     go ('[' :: rest) buf =
@@ -542,7 +573,7 @@ buildToc hs =
 defTemplate : String
 defTemplate = """
 <!DOCTYPE html>
-<html lang="en" prefix="rdf: http://www.w3.org/1999/02/22-rdf-syntax-ns# rdfs: http://www.w3.org/2000/01/rdf-schema# owl: http://www.w3.org/2002/07/owl# schema: http://schema.org/">
+<html lang="{{lang}}" prefix="rdf: http://www.w3.org/1999/02/22-rdf-syntax-ns# rdfs: http://www.w3.org/2000/01/rdf-schema# owl: http://www.w3.org/2002/07/owl# schema: http://schema.org/">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -567,7 +598,7 @@ defTemplate = """
     <nav class="container nav" aria-label="Primary" role="navigation" typeof="schema:SiteNavigationElement">
       <a class="brand" href="{{root}}/" property="schema:url"><span property="schema:name">{{brand}}</span></a>
       <ul class="nav-links">
-        <li><a href="{{root}}/" property="schema:url">Home</a></li>
+        {{menu}}
       </ul>
     </nav>
   </header>
@@ -749,17 +780,44 @@ stripPlaceholders s = pack (go (unpack s))
          then go (afterClose (drop 2 cs))
       else c :: go rest
 
+-- Page values a template can show besides the front matter's. The caller
+-- applies the precedence (front matter, then ddraig.toml, then default).
+record PageVars where
+  constructor MkPageVars
+  pvRoot      : String   -- {{root}}: the base URL's path, e.g. /ddraig-ssg
+  pvCanonical : String   -- {{canonical}}
+  pvLang      : String   -- {{lang}}
+  pvMenu      : String   -- {{menu}}: the menu's list items, rendered HTML
+  pvAuthor    : String   -- {{author}}
+
+-- The menu shown when ddraig.toml defines no [[menus.main]].
+defaultMenu : List MenuItem
+defaultMenu = [MkMenuItem "Home" "/"]
+
+-- A menu's list items, through the typed Html core. A url starting with "/"
+-- (but not "//") is inside the site, so the root goes in front of it.
+renderMenu : (root : String) -> List MenuItem -> String
+renderMenu root items = concat (intersperse "\n        " (map (render . item) items))
+  where
+    href : String -> String
+    href u = if strHasPrefix "/" u && not (strHasPrefix "//" u) then root ++ u else u
+    item : MenuItem -> Html
+    item m = Elem "li" [] [Elem "a" [("href", href m.itemUrl), ("property", "schema:url")] [Text m.itemName]]
+
 export
-applyTemplate : String -> Frontmatter -> (root : String) -> (canonical : String) -> String -> String -> String
-applyTemplate template fm root canonical htmlContent tocHtml =
+applyTemplate : String -> Frontmatter -> PageVars -> String -> String -> String
+applyTemplate template fm pv htmlContent tocHtml =
   let brand = if fm.brand == "" then fm.title else fm.brand
-      t1 = strReplace template "{{title}}" (strEscape fm.title)
-      t2 = strReplace t1 "{{date}}" (strEscape fm.date)
-      t3 = strReplace t2 "{{description}}" (strEscape fm.description)
-      t4 = strReplace t3 "{{brand}}" (strEscape brand)
-      tc = strReplace t4 "{{canonical}}" (strEscape canonical)
-      tr = strReplace tc "{{root}}" (strEscape root)
-      t5 = strReplace tr "{{toc}}" tocHtml
+      t1 = strReplace template "{{title}}" (tplEscape fm.title)
+      t2 = strReplace t1 "{{date}}" (tplEscape fm.date)
+      t3 = strReplace t2 "{{description}}" (tplEscape fm.description)
+      t4 = strReplace t3 "{{brand}}" (tplEscape brand)
+      tc = strReplace t4 "{{canonical}}" (tplEscape pv.pvCanonical)
+      tr = strReplace tc "{{root}}" (tplEscape pv.pvRoot)
+      tl = strReplace tr "{{lang}}" (tplEscape pv.pvLang)
+      ta = strReplace tl "{{author}}" (tplEscape pv.pvAuthor)
+      tm = strReplace ta "{{menu}}" (braceSafe pv.pvMenu)
+      t5 = strReplace tm "{{toc}}" (braceSafe tocHtml)
       -- strip any remaining unfilled placeholders BEFORE injecting content,
       -- so author content (which may legitimately contain braces) is untouched
       t6 = stripPlaceholders t5
@@ -814,15 +872,18 @@ dirOf path =
                  [] => ""
                  _  => foldr (\a, b => if b == "" then a else a ++ "/" ++ b) "" xs
 
--- Recursively gather all files under `root` matching predicate, returning
--- paths relative to `root`.
+-- Recursively gather all files under `root`, returning paths relative to
+-- `root`. Each directory's entries are sorted first: listDir returns them in
+-- the filesystem's own order (hash order on ext4, and different again on
+-- another machine), and the sitemap, feed and attestation list pages in walk
+-- order, so sorting is what makes the output the same everywhere.
 walkFiles : HasIO io => (root : String) -> (rel : String) -> io (List String)
 walkFiles root rel = do
   let dir = joinPath root rel
   r <- listDir dir
   case r of
     Left _ => pure []
-    Right entries => concatMap' entries
+    Right entries => concatMap' (sort entries)
   where
     concatMap' : List String -> io (List String)
     concatMap' [] = pure []
@@ -888,15 +949,18 @@ resolvePartials src tpl = go tpl 64
                        _ => findInclude more (c :: acc)
              else findInclude more (c :: acc)
 
--- Load template by layout name; fall back to built-in.
-loadTemplate : HasIO io => (src : String) -> (layout : String) -> io String
-loadTemplate src layout = do
+-- Load template by layout name; fall back to built-in. Partials are inlined,
+-- then {{site...}} and {{data...}} variables are filled in (they were checked
+-- before the build started, by checkTemplates).
+loadTemplate : HasIO io => (src : String) -> (vars : List (String, TValue)) -> (layout : String) -> io String
+loadTemplate src vars layout = do
   let name = if layout == "" then "default" else layout
   let name2 = if strHasSuffix ".html" name then name else name ++ ".html"
   let path = joinPath src ("templates/" ++ name2)
   r <- readFile path
   case r of
-    Right c => resolvePartials src c
+    Right c => do full <- resolvePartials src c
+                  pure (fst (resolveVars tplEscape vars path full))
     Left _ => pure defTemplate
 
 -- change ".md"/".markdown" extension to ".html"
@@ -941,11 +1005,109 @@ basePath base = pack (reverse (dropSlashes (reverse (pathOf (afterScheme (unpack
     dropSlashes ('/' :: rest) = dropSlashes rest
     dropSlashes cs = cs
 
--- Build one markdown file. Returns Maybe Page (Nothing if draft skipped).
--- Build one markdown file. Returns the Page plus its O3 certification status
--- (certified?, violations). Nothing only when the file is a draft or unreadable.
-buildOne : HasIO io => (src : String) -> (out : String) -> (base : String) -> (rel : String) -> io (Maybe (Page, Bool, List String))
-buildOne src out base rel = do
+-- Everything a page build needs to know about the site.
+record BuildCtx where
+  constructor MkBuildCtx
+  ctxSrc  : String
+  ctxOut  : String
+  ctxBase : String                  -- the base URL in effect
+  ctxCfg  : SiteConfig              -- ddraig.toml (noConfig without one)
+  ctxVars : List (String, TValue)   -- {{site...}} and {{data...}} values
+
+-- The first non-empty of a front matter value and a site value, else a default.
+pick : String -> Maybe String -> String -> String
+pick page site dflt =
+  if page /= "" then page else case site of
+    Just s  => if s /= "" then s else dflt
+    Nothing => dflt
+
+-- One built page: its O3 certification status (certified?, violations), how
+-- many raw HTML blocks it has (not inspected by the certifier, so the
+-- attestation lists them), and located DDR0801 errors for images without alt.
+record PageResult where
+  constructor MkPageResult
+  page       : Page
+  certified  : Bool
+  violations : List String
+  rawBlocks  : Nat
+  imageDiags : List Diagnostic
+
+-- DDR0801 for each image without alt text, in document order. The parser has
+-- already decided which images lack alt (so an image inside code is never
+-- reported); this only finds where to point, by searching the page source for
+-- each one's `![<blank>](src)` in turn, outside front matter and fenced code.
+-- A described image with the same src is not matched. One that cannot be
+-- found is reported against the file without a position. (Carrying source
+-- positions through the Markdown parser would make this exact; see
+-- docs/proof-debt.adoc.)
+missingAltDiags : (file : String) -> (content : String) -> List String -> List Diagnostic
+missingAltDiags file content srcs = start (lines content) srcs
+  where
+    diag : String -> Diagnostic
+    diag src = withHelp "describe the image inside the brackets, or add {.decorative} straight after it if it is purely decorative" $
+               diagError ImageMissingAlt ("image \"" ++ src ++ "\" has no alt text")
+    findFrom : List Char -> List Char -> Nat -> Maybe Nat
+    findFrom needle hay i =
+      if isPrefixOf needle hay then Just i
+      else case hay of
+             []          => Nothing
+             (_ :: rest) => findFrom needle rest (S i)
+    -- index of the last "![" in a line prefix
+    lastBang : List Char -> Maybe Nat
+    lastBang cs = goB 0 cs Nothing
+      where
+        goB : Nat -> List Char -> Maybe Nat -> Maybe Nat
+        goB _ [] best = best
+        goB i ('!' :: '[' :: rest) _ = goB (S i) ('[' :: rest) (Just i)
+        goB i (_ :: rest) best = goB (S i) rest best
+    isFence : String -> Bool
+    isFence l = strHasPrefix "```" (trim l) || strHasPrefix "~~~" (trim l)
+    unfound : List String -> List Diagnostic
+    unfound = map (\x => inFile file (diag x))
+    -- Next searchable line: skips fenced code blocks.
+    -- n: line number of the line being searched (1-based)
+    mutual
+      next : Nat -> Bool -> List String -> List String -> List Diagnostic
+      next _ _ _ [] = []
+      next _ _ [] ss = unfound ss
+      next n fence (l :: ls) ss =
+        if isFence l then next (S n) (not fence) ls ss
+        else if fence then next (S n) fence ls ss
+        else go n 0 (unpack l) ls ss
+      -- off: column offset of `cs` within line n
+      go : Nat -> Nat -> List Char -> List String -> List String -> List Diagnostic
+      go _ _ _ _ [] = []
+      go n off cs ls (s :: ss) =
+        let needle = unpack ("](" ++ s ++ ")") in
+        case findFrom needle cs 0 of
+          Nothing => next (S n) False ls (s :: ss)
+          Just i =>
+            let endI = i + length needle in
+            case lastBang (take i cs) of
+              Just bang =>
+                if trim (pack (drop (bang + 2) (take i cs))) == ""
+                   then atPos file n (S (off + bang)) (endI `minus` bang) "no alt text" (diag s)
+                          :: go n (off + endI) (drop endI cs) ls ss
+                   else go n (off + endI) (drop endI cs) ls (s :: ss)   -- described: not this one
+              Nothing => go n (off + endI) (drop endI cs) ls (s :: ss)
+    -- Skip front matter (a leading "---" block, after any blank or comment lines).
+    start : List String -> List String -> List Diagnostic
+    start ls ss = case break (\l => trim l == "---") ls of
+      (pre, (_ :: rest)) =>
+        if all (\l => trim l == "" || strHasPrefix "<!--" (trim l)) pre
+           then case break (\l => trim l == "---") rest of
+                  (fmLines, (_ :: body)) => next (length pre + length fmLines + 3) False body ss
+                  _ => next 1 False ls ss
+           else next 1 False ls ss
+      _ => next 1 False ls ss
+
+-- Build one markdown file. Nothing only when the file is a draft or unreadable.
+buildOne : HasIO io => BuildCtx -> (rel : String) -> io (Maybe PageResult)
+buildOne ctx rel = do
+  let src = ctx.ctxSrc
+  let out = ctx.ctxOut
+  let base = ctx.ctxBase
+  let cfg = ctx.ctxCfg
   let inPath = joinPath src rel
   r <- readFile inPath
   case r of
@@ -957,12 +1119,19 @@ buildOne src out base rel = do
          else do
            let md = parseMarkdownFull body
            let toc = buildToc md.toc
-           tpl <- loadTemplate src fm.template
+           tpl <- loadTemplate src ctx.ctxVars fm.template
            let title = if fm.title == "" then rel else fm.title
            let fm2 = { title := title } fm
            let relHtml = toHtmlPath rel
            let canonical = absUrl base ("/" ++ relHtml)
-           let html = applyTemplate tpl fm2 (basePath base) canonical md.body toc
+           let root = basePath base
+           -- precedence: front matter, then ddraig.toml, then the default
+           let shown = { brand := pick fm.brand cfg.siteTitle ""
+                       , description := pick fm.description cfg.siteDescription "" } fm2
+           let menuItems = fromMaybe defaultMenu (lookup "main" cfg.siteMenus)
+           let pv = MkPageVars root canonical (pick fm.lang cfg.siteLanguage "en")
+                               (renderMenu root menuItems) (pick fm.author cfg.siteAuthor "")
+           let html = applyTemplate tpl shown pv md.body toc
            let outPath = joinPath out relHtml
            _ <- mkDirP (dirOf outPath)
            w <- writeFile outPath html
@@ -976,7 +1145,9 @@ buildOne src out base rel = do
                putStrLn ("  + " ++ rel ++ " -> " ++ relHtml
                           ++ (if certified then "  [a11y ok]" else "  [a11y FAIL]"))
                traverse_ (\v => putStrLn ("    a11y: " ++ v)) viols
-               pure (Just (MkPage ("/" ++ relHtml) fm2, certified, viols))
+               pure (Just (MkPageResult (MkPage ("/" ++ relHtml) fm2) certified viols
+                             (countRawF md.blocks)
+                             (missingAltDiags inPath content (unlabelledF md.blocks))))
 
 -- Copy known asset dirs (assets/static/css/js/images) preserving name.
 copyAssets : HasIO io => (src : String) -> (out : String) -> io ()
@@ -1062,16 +1233,42 @@ civilFromDays days =
       m   = if mp < 10 then mp + 3 else mp - 9
   in (if m <= 2 then y + 1 else y, m, d)
 
--- Current UTC date as "YYYY-MM-DD" (the feed <updated> fallback when no page
--- carries a date).
-currentUtcDate : HasIO io => io String
-currentUtcDate = do
-  c <- liftIO (clockTime UTC)
-  let (y, m, d) = civilFromDays (seconds c `div` 86400)
-  pure (show y ++ "-" ++ pad2 m ++ "-" ++ pad2 d)
+-- The build's "now" in seconds since the Unix epoch. SOURCE_DATE_EPOCH
+-- (https://reproducible-builds.org/specs/source-date-epoch/), when set and
+-- non-empty, replaces the clock, so a build and its golden tests do not depend
+-- on the day they run. A value that is not a non-negative integer is reported
+-- (DDR0001) rather than silently ignored.
+buildEpochSeconds : HasIO io => io (Either Diagnostic Integer)
+buildEpochSeconds = do
+  env <- getEnv "SOURCE_DATE_EPOCH"
+  case env of
+    Just s =>
+      if s == "" then map Right clock
+      else case (all isDigit (unpack s), parsePositive s) of
+             (True, Just n) => pure (Right n)
+             _ => pure (Left (badEpoch s))
+    Nothing => map Right clock
+  where
+    clock : io Integer
+    clock = do c <- liftIO (clockTime UTC); pure (seconds c)
+    badEpoch : String -> Diagnostic
+    badEpoch s =
+      withHelp "unset it, or set it to the empty string, to use today's date" $
+      withHelp "use whole seconds since 1970-01-01 UTC, digits only: SOURCE_DATE_EPOCH=1782086400" $
+      diagError BadSourceDateEpoch
+        ("SOURCE_DATE_EPOCH must be a whole number of seconds, but it is \"" ++ s ++ "\"")
+
+-- The build date as "YYYY-MM-DD": the attestation's "generated" date and the
+-- feed <updated> fallback when no page carries a date. Read once per build,
+-- so the two always agree.
+currentUtcDate : HasIO io => io (Either Diagnostic String)
+currentUtcDate = map (map toDate) buildEpochSeconds
   where
     pad2 : Integer -> String
     pad2 n = if n < 10 then "0" ++ show n else show n
+    toDate : Integer -> String
+    toDate secs = let (y, m, d) = civilFromDays (secs `div` 86400)
+                  in show y ++ "-" ++ pad2 m ++ "-" ++ pad2 d
 
 -- sitemap.xml (locs are absolute when a base URL is supplied)
 genSitemap : HasIO io => (base : String) -> (out : String) -> List Page -> io ()
@@ -1092,14 +1289,15 @@ genSitemap base out pages = do
 -- feed.xml (Atom). Emits every RFC 4287-required element: feed
 -- id/title/updated/author and per-entry id/title/updated. Ids and links are
 -- absolute when a base URL is supplied, urn: ids otherwise.
-genFeed : HasIO io => (base : String) -> (out : String) -> List Page -> io ()
-genFeed base out pages = do
-  now <- currentUtcDate
+genFeed : HasIO io => (base : String) -> (out : String) -> (now : String)
+       -> (siteTitle : Maybe String) -> List Page -> io ()
+genFeed base out now siteTitle pages = do
   let dated = filter (/= "") (map (\pg => pg.fm.date) pages)
   let feedUpdated = rfc3339 (case dated of
                                [] => now
                                _  => foldl (\a, b => if a >= b then a else b) "" dated)
-  let siteName = case filter (/= "") (map (\pg => pg.fm.brand) pages) of
+  -- [site] title from ddraig.toml if set, else the first page's site/brand
+  let siteName = case filter (/= "") (maybe [] pure siteTitle ++ map (\pg => pg.fm.brand) pages) of
                    (b :: _) => b
                    []       => "Ddraig Site"
   let entries = concatMap (entry feedUpdated) pages
@@ -1141,16 +1339,17 @@ jsonEsc s = concat (map e (unpack s))
 
 -- Emit the O3 attestation certificate: one record per page stating whether it
 -- satisfies the decidable accessibility predicates, and any violations. A page
--- marked `certified: true` is so because `certify` produced the proof.
+-- marked `certified: true` is so because `certify` produced the proof. Raw
+-- HTML blocks are not inspected, so each page also states how many it has.
 writeAttestation : HasIO io => (base : String) -> (out : String) -> (now : String)
-                -> List (Page, Bool, List String) -> io ()
+                -> List PageResult -> io ()
 writeAttestation base out now results = do
   let entries = concat (intersperse ",\n" (map entryJson results))
   let json = "{\n"
           ++ "  \"generator\": \"Ddraig SSG " ++ ddraigVersion ++ "\",\n"
           ++ "  \"generated\": \"" ++ now ++ "T00:00:00Z\",\n"
-          ++ "  \"scope\": \"decidable WCAG subset (content tree)\",\n"
-          ++ "  \"predicates\": [\"one-h1\", \"heading-no-skip\", \"alt-present-by-construction\"],\n"
+          ++ "  \"scope\": \"decidable WCAG subset (typed content tree; raw HTML blocks are not inspected)\",\n"
+          ++ "  \"predicates\": [" ++ concat (intersperse ", " (map (\p => "\"" ++ p ++ "\"") certifiedPredicates)) ++ "],\n"
           ++ "  \"pages\": [\n" ++ entries ++ "\n  ]\n"
           ++ "}\n"
   let dst = joinPath out ".well-known/accessibility-attestation.json"
@@ -1158,54 +1357,188 @@ writeAttestation base out now results = do
   ignore (writeFile dst json)
   putStrLn "  + .well-known/accessibility-attestation.json"
   where
-    entryJson : (Page, Bool, List String) -> String
-    entryJson (p, certified, viols) =
-      "    {\"page\": \"" ++ jsonEsc (absUrl base p.url)
-        ++ "\", \"certified\": " ++ (if certified then "true" else "false")
+    entryJson : PageResult -> String
+    entryJson r =
+      "    {\"page\": \"" ++ jsonEsc (absUrl base r.page.url)
+        ++ "\", \"certified\": " ++ (if r.certified then "true" else "false")
+        ++ ", \"unchecked_raw_html_blocks\": " ++ show r.rawBlocks
         ++ ", \"violations\": ["
-        ++ concat (intersperse ", " (map (\v => "\"" ++ jsonEsc v ++ "\"") viols))
+        ++ concat (intersperse ", " (map (\v => "\"" ++ jsonEsc v ++ "\"") r.violations))
         ++ "]}"
 
--- Full build command.
-buildSite : HasIO io => (src : String) -> (out : String) -> (base : String) -> io ()
-buildSite src out base = do
+-- ----------------------------------------------------------------------------
+-- Reporting problems (format and codes: Diagnostic.idr, DIAGNOSTICS.adoc)
+-- ----------------------------------------------------------------------------
+
+-- Print diagnostics on stderr, quoting the source line of any that point into
+-- a readable file.
+report : HasIO io => List Diagnostic -> io ()
+report ds = do
+  srcs <- traverse load (nub (mapMaybe diagFile ds))
+  -- progress written so far comes first, even when stdout is a buffered pipe
+  fflush stdout
+  ignore (fPutStr stderr (renderAll (\f => join (lookup f srcs)) ds))
+  where
+    load : String -> io (String, Maybe String)
+    load f = do r <- readFile f; pure (f, either (const Nothing) Just r)
+
+-- Report problems, then a one-line verdict, and exit with status 1.
+failWith : HasIO io => (verdict : String) -> List Diagnostic -> io a
+failWith verdict ds = do
+  report ds
+  ignore (fPutStrLn stderr ("\nddraig: " ++ verdict ++ ": " ++ summary ds))
+  exitWith (ExitFailure 1)
+
+-- Report problems that stop a build, and exit with status 1.
+failBuild : HasIO io => List Diagnostic -> io a
+failBuild = failWith "build stopped"
+
+-- Report a mistake on the command line, and exit with status 2.
+failUsage : HasIO io => List Diagnostic -> io a
+failUsage ds = do report ds; exitWith (ExitFailure 2)
+
+-- The source directory must exist and be a directory (DDR0002).
+checkSourceDir : HasIO io => String -> io (List Diagnostic)
+checkSourceDir src = do
+  dir <- isDir src
+  if dir then pure [] else do
+    file <- fileExists src
+    pure [ if file
+             then withHelp "give the directory that contains your pages instead" $
+                  diagError SourceDirMissing
+                    ("\"" ++ src ++ "\" is a file; `ddraig build` needs the directory of source pages")
+             else withHelp "check the spelling; a relative path starts from the directory ddraig runs in" $
+                  diagError SourceDirMissing ("source directory \"" ++ src ++ "\" does not exist") ]
+
+-- Parse and check the text of a site configuration (DDR01xx).
+checkConfigText : (path : String) -> (text : String) -> Either (List Diagnostic) SiteConfig
+checkConfigText path text =
+  let (tables, syntaxProblems) = parseToml path text in
+  case validateConfig path tables of
+    Left ds   => Left (syntaxProblems ++ ds)
+    Right cfg => if null syntaxProblems then Right cfg else Left syntaxProblems
+
+-- <src>/ddraig.toml, checked; the defaults when there is none.
+loadSiteConfig : HasIO io => (src : String) -> io (Maybe String, Either (List Diagnostic) SiteConfig)
+loadSiteConfig src = do
+  let path = joinPath src "ddraig.toml"
+  r <- readFile path
+  case r of
+    Left _     => pure (Nothing, Right noConfig)
+    Right text => pure (Just path, checkConfigText path text)
+
+-- <src>/data/*.toml, read for templates; any TOML problems in them.
+loadDataFiles : HasIO io => (src : String) -> io (List DataFile, List Diagnostic)
+loadDataFiles src = do
+  r <- listDir (joinPath src "data")
+  case r of
+    Left _      => pure ([], [])
+    Right names => go (sort (filter (strHasSuffix ".toml") names)) [] []
+  where
+    go : List String -> List DataFile -> List Diagnostic -> io (List DataFile, List Diagnostic)
+    go [] fs ds = pure (reverse fs, ds)
+    go (n :: ns) fs ds = do
+      let path = joinPath src ("data/" ++ n)
+      r <- readFile path
+      case r of
+        Left _ => go ns fs (ds ++ [ inFile path (diagError ConfigUnreadable ("cannot read \"" ++ path ++ "\"")) ])
+        Right text =>
+          let (ts, errs) = parseToml path text in
+          go ns (MkDataFile (substr 0 (length n `minus` 5) n) ts :: fs) (ds ++ errs)
+
+-- Every template and partial, checked for {{site...}} and {{data...}}
+-- variables that do not exist (DDR0201) or hold a list (DDR0202).
+checkTemplates : HasIO io => (src : String) -> List (String, TValue) -> io (List Diagnostic)
+checkTemplates src vars = do
+  let dir = joinPath src "templates"
+  rels <- walkFiles dir ""
+  found <- traverse (\rel => do
+             let path = joinPath dir rel
+             r <- readFile path
+             pure (case r of
+                     Right text => snd (resolveVars tplEscape vars path text)
+                     Left _     => []))
+           (filter (strHasSuffix ".html") rels)
+  pure (concat found)
+
+-- `ddraig validate-config <file>`: the same checks `ddraig build` makes.
+validateConfigFile : HasIO io => String -> io ()
+validateConfigFile path = do
+  r <- readFile path
+  case r of
+    Left _ => failWith ("cannot check " ++ path)
+                [ withHelp "check the path; `ddraig build` reads ddraig.toml from the source directory" $
+                  diagError ConfigUnreadable ("cannot read \"" ++ path ++ "\"") ]
+    Right text => case checkConfigText path text of
+      Right _ => putStrLn ("OK: " ++ path ++ " is a valid site configuration")
+      Left ds => failWith (path ++ " is not a valid site configuration") ds
+
+-- Full build command. Everything that can be checked before writing output is
+-- checked first, and all of it is reported together.
+buildSite : HasIO io => (src : String) -> (out : String) -> (cliBase : String) -> io ()
+buildSite src out cliBase = do
   putStrLn ("Ddraig build: " ++ src ++ " -> " ++ out)
-  ok <- isDir src
-  if not ok
-     then putStrLn ("ERROR: source dir not found: " ++ src)
+  srcProblems <- checkSourceDir src
+  today <- currentUtcDate
+  let srcOk = null srcProblems
+  -- (with no source directory these find nothing, and report nothing)
+  (cfgPath, cfgResult) <- loadSiteConfig src
+  (datas, dataProblems) <- loadDataFiles src
+  let cfg = either (const noConfig) id cfgResult
+  -- base URL: the command line's, else ddraig.toml's
+  let base = if cliBase /= "" then cliBase else fromMaybe "" cfg.siteBaseUrl
+  let vars = templateVars cfg base datas
+  -- templates are checked only against a valid configuration and readable
+  -- data files, so one mistake is not reported again as many
+  tplProblems <- if srcOk && either (const False) (const True) cfgResult && null dataProblems
+                   then checkTemplates src vars else pure []
+  let problems = srcProblems ++ either id (const []) cfgResult ++ dataProblems
+                 ++ tplProblems ++ either (\d => [d]) (const []) today
+  case today of
+    Left _ => failBuild problems
+    Right now =>
+     if not (null problems)
+     then failBuild problems
      else do
+       traverse_ (\p => putStrLn ("  config: " ++ p)) cfgPath
+       when (base /= "") $
+         putStrLn ("  base URL: " ++ base
+                   ++ (if cliBase /= "" then " (from the command line)" else " (from ddraig.toml)"))
+       let ctx = MkBuildCtx src out base cfg vars
        _ <- mkDirP out
        all <- walkFiles src ""
        -- skip files under templates/, public/, and the asset dirs (handled separately)
        let mdFiles = filter (\p => isMarkdown p && not (underSpecial p)) all
        putStrLn ("Found " ++ show (length mdFiles) ++ " markdown file(s).")
-       results <- buildEach mdFiles
-       let pages = map (\(p, _, _) => p) results
+       results <- buildEach ctx mdFiles
+       let pages = map (.page) results
        copyAssets src out
        writeDefaultStyle src out
        copyPublic src out
        genSitemap base out pages
-       genFeed base out pages
-       now <- currentUtcDate
+       genFeed base out now cfg.siteTitle pages
        writeAttestation base out now results
        putStrLn ("Done. " ++ show (length pages) ++ " page(s) built.")
-       let failed = filter (\(_, c, _) => not c) results
+       -- images without alt: located errors (each page is also uncertified)
+       let imgDiags = concatMap (.imageDiags) results
+       when (not (null imgDiags)) $ report imgDiags
+       let failed = filter (\r => not r.certified) results
        when (not (null failed)) $ do
          putStrLn ("ACCESSIBILITY: " ++ show (length failed) ++ " page(s) failed certification:")
-         traverse_ (\(p, _, vs) => do
-                      putStrLn ("  " ++ p.url)
-                      traverse_ (\v => putStrLn ("    - " ++ v)) vs) failed
+         traverse_ (\r => do
+                      putStrLn ("  " ++ r.page.url)
+                      traverse_ (\v => putStrLn ("    - " ++ v)) r.violations) failed
          exitFailure
   where
     underSpecial : String -> Bool
     underSpecial p =
       any (\d => strHasPrefix (d ++ "/") p)
-          ["templates","public","assets","static","css","js","images"]
-    buildEach : List String -> io (List (Page, Bool, List String))
-    buildEach [] = pure []
-    buildEach (f :: fs) = do
-      mp <- buildOne src out base f
-      rest <- buildEach fs
+          ["templates","public","assets","static","css","js","images","data"]
+    buildEach : BuildCtx -> List String -> io (List PageResult)
+    buildEach _ [] = pure []
+    buildEach ctx (f :: fs) = do
+      mp <- buildOne ctx f
+      rest <- buildEach ctx fs
       pure (maybe rest (:: rest) mp)
 
 -- clean command: remove output dir contents (best-effort, recursive).
@@ -1248,14 +1581,18 @@ testFull = do
   let content = "---\ntitle: Welcome\ndate: 2024-01-15\n---\n\n# Welcome\n\nThis is **Ddraig**, an Idris 2-powered SSG.\n\n- Dependently typed\n- Provably correct\n"
   let (fm, body) = parseFrontmatter content
   let md = parseMarkdownFull body
-  let output = applyTemplate defTemplate fm "" "/welcome.html" md.body (buildToc md.toc)
+  let output = applyTemplate defTemplate fm
+                 (MkPageVars "" "/welcome.html" "en" (renderMenu "" defaultMenu) "")
+                 md.body (buildToc md.toc)
   putStrLn output
   -- {{root}}: a sub-path site's links must carry its prefix.
   let cases = [ ("", ""), ("https://example.com", ""), ("https://example.com/", "")
               , ("https://hyperpolymath.github.io/ddraig-ssg", "/ddraig-ssg")
               , ("https://example.org/a/b/", "/a/b") ]
   let wrong = filter (\(b, want) => basePath b /= want) cases
-  let rooted = applyTemplate defTemplate fm "/sub" "/sub/welcome.html" md.body ""
+  let rooted = applyTemplate defTemplate fm
+                 (MkPageVars "/sub" "/sub/welcome.html" "en" (renderMenu "/sub" defaultMenu) "")
+                 md.body ""
   let styled = strReplace rooted "href=\"/sub/assets/style.css\"" "" /= rooted
   if null wrong && styled
      then putStrLn "OK: basePath and {{root}}"
@@ -1310,10 +1647,146 @@ testAttest = do
     Left vs => do putStrLn ("OK: inaccessible document rejected (" ++ show (length vs) ++ " violation(s))")
                   traverse_ (\v => putStrLn ("  - " ++ v)) vs
     Right _ => do putStrLn "FAIL: inaccessible document certified"; exitFailure
+  -- alt text: whitespace-only is rejected at the trust boundary
+  case mkAlt "   " of
+    Nothing => putStrLn "OK: whitespace-only alt text rejected"
+    Just _  => do putStrLn "FAIL: whitespace-only alt text accepted"; exitFailure
+  -- images: described and {.decorative} certify; no alt without the marker does not
+  let labelled = parseMarkdownFull "# One\n\n![A red dragon](d.png) and ![](rule.png){.decorative}\n"
+  let unlabelled = parseMarkdownFull "# One\n\n![](d.png)\n"
+  case certify labelled.blocks of
+    Right _  => putStrLn "OK: described and decorative images certified"
+    Left  vs => do putStrLn "FAIL: described/decorative images not certified"
+                   traverse_ (\v => putStrLn ("  - " ++ v)) vs
+                   exitFailure
+  case certify unlabelled.blocks of
+    Left vs => do putStrLn "OK: image without alt rejected"
+                  traverse_ (\v => putStrLn ("  - " ++ v)) vs
+    Right _ => do putStrLn "FAIL: image without alt certified"; exitFailure
+
+-- Rendering samples and invariants for the diagnostics core. The rendered
+-- text is pinned by tests/golden/cli/test-diagnostics.out; the invariants
+-- (unique, round-tripping codes; the expected suggestions) fail the test.
+testDiagnostics : IO ()
+testDiagnostics = do
+  putStrLn "=== Test: diagnostics ==="
+  let ids = map codeId allCodes
+  let unique = length (nub ids) == length ids
+  let roundTrip = all (\c => map codeId (fromId (codeId c)) == Just (codeId c)) allCodes
+  putStrLn ("codes: " ++ show (length ids) ++ ", unique: " ++ show unique
+            ++ ", round-trip: " ++ show roundTrip)
+  let cases = the (List (String, List String, Maybe String))
+                [ ("titel",  ["title", "date", "tags"], Just "title")    -- transposed letters
+                , ("Title",  ["title", "date"],         Just "title")    -- case only
+                , ("biuld",  ["build", "clean", "explain"], Just "build")
+                , ("DDR002", ids,                       Just "DDR0002")  -- a missing digit
+                , ("xyz",    ["title", "date"],         Nothing)         -- nothing close
+                , ("title",  ["title"],                 Nothing) ]       -- identical: no typo
+  traverse_ (\(w, _, e) => putStrLn ("closest " ++ show w ++ ": " ++ show e)) cases
+  let wrong = filter (\(w, k, e) => closest w k /= e) cases
+  putStrLn ""
+  putStr (renderAll sourceOf samples)
+  putStrLn ""
+  putStrLn ("summary: " ++ summary samples)
+  if unique && roundTrip && null wrong
+     then putStrLn "OK: diagnostics"
+     else do putStrLn ("FAIL: diagnostics; wrong suggestions for " ++ show (map fst wrong))
+             exitFailure
+  where
+    toml : String
+    toml = "[site]\ntitle = \"Example\"\ntitel = \"Typo\"\n"
+    long : String
+    long = concat (Data.List.replicate 10 "filler = 1\n") ++ "\tvalue = [1, 2\n"
+    gappy : String
+    gappy = "first\n\nthird\n"
+    sourceOf : String -> Maybe String
+    sourceOf "sample/site.toml"  = Just toml
+    sourceOf "sample/long.toml"  = Just long
+    sourceOf "sample/gappy.md"   = Just gappy
+    sourceOf _                   = Nothing
+    samples : List Diagnostic
+    samples =
+      [ withNote "this is a rendering sample, not a real message" $
+        withHelp "did you mean \"title\"?" $
+        atPos "sample/site.toml" 3 1 5 "not a known key" $
+        diagError UnknownCommand "sample: located error with a label, help and a note"
+      , withHelp "a two-digit line number widens the gutter; the tab shows as one space" $
+        atPos "sample/long.toml" 11 10 5 "this list is never closed" $
+        diagWarning WrongArguments "sample: warning on line 11"
+      , atPos "sample/site.toml" 2 18 3 "one caret just past the end, e.g. for something missing" $
+        diagError WrongArguments "sample: span past the end of the line"
+      , atPos "sample/gappy.md" 2 1 1 "" $
+        diagError WrongArguments "sample: an empty source line"
+      , withHelp "the file could not be read, so no line is quoted" $
+        atPos "sample/unreadable.md" 4 2 1 "unseen" $
+        diagError SourceDirMissing "sample: located in a file that cannot be read"
+      , inFile "sample/whole-file.md" $
+        diagError SourceDirMissing "sample: a whole file"
+      , withHelp "no file at all, as for a command-line mistake" $
+        diagError UnknownCode "sample: no location"
+      ]
 
 -- ============================================================================
 -- Main
 -- ============================================================================
+
+-- A command, as `ddraig --help` and the command-line errors describe it.
+record Command where
+  constructor MkCommand
+  cmdName : String
+  cmdArgs : String   -- e.g. "<src> <out> [base-url]"
+  minArgs : Nat
+  maxArgs : Nat
+
+commands : List Command
+commands =
+  [ MkCommand "build"          "<src> <out> [base-url]" 2 3
+  , MkCommand "clean"          "<out>"                  1 1
+  , MkCommand "validate-state" "<file.a2ml>"            1 1
+  , MkCommand "validate-config" "<ddraig.toml>"         1 1
+  , MkCommand "explain"        "[code]"                 0 1
+  , MkCommand "--help"         ""                       0 0
+  , MkCommand "--version"      ""                       0 0 ]
+
+-- Everything accepted as a first argument, for "did you mean ...?".
+commandNames : List String
+commandNames =
+  map cmdName commands
+    ++ ["help", "-h", "-v", "test-markdown", "test-frontmatter", "test-full",
+        "test-state", "test-attest", "test-diagnostics"]
+
+-- The command line matched no command: either an unknown command (DDR0003)
+-- or a known one with the wrong number of arguments (DDR0004).
+badInvocation : String -> List String -> Diagnostic
+badInvocation cmd rest =
+  case filter (\c => c.cmdName == cmd) commands of
+    (c :: _) =>
+      withHelp ("usage: " ++ synopsis c) $
+      diagError WrongArguments
+        ("`ddraig " ++ cmd ++ "` takes " ++ takes c.minArgs c.maxArgs
+         ++ ", but was given " ++ show (length rest))
+    [] =>
+      withHelp "run `ddraig --help` to list the commands" $
+      withHelps (didYouMean cmd commandNames) $
+      diagError UnknownCommand ("unknown command \"" ++ cmd ++ "\"")
+  where
+    synopsis : Command -> String
+    synopsis c = "ddraig " ++ c.cmdName ++ (if c.cmdArgs == "" then "" else " " ++ c.cmdArgs)
+    takes : Nat -> Nat -> String
+    takes 0 0 = "no arguments"
+    takes 1 1 = "1 argument"
+    takes lo hi = if lo == hi then show lo ++ " arguments"
+                  else show lo ++ " or " ++ show hi ++ " arguments"
+
+-- `ddraig explain <code>`: the code may be given in either case.
+explainCode : String -> IO ()
+explainCode c =
+  case fromId (toUpper (trim c)) of
+    Just code => putStr (renderExplanation code)
+    Nothing =>
+      failUsage [ withHelp "run `ddraig explain` with no code to list every code" $
+                  withHelps (didYouMean (toUpper (trim c)) (map codeId allCodes)) $
+                  diagError UnknownCode ("\"" ++ c ++ "\" is not a diagnostic code") ]
 
 usage : IO ()
 usage = do
@@ -1323,13 +1796,24 @@ usage = do
   putStrLn "  ddraig build <src> <out> [base-url]  Build a site"
   putStrLn "        base-url (e.g. https://example.com) makes sitemap.xml and"
   putStrLn "        feed.xml URLs absolute (recommended; required for a valid sitemap)"
+  putStrLn "        SOURCE_DATE_EPOCH (seconds since 1970-01-01 UTC), if set, fixes the"
+  putStrLn "        build date, so the same sources always give the same output"
   putStrLn "  ddraig clean <out>         Remove built files under <out>"
   putStrLn "  ddraig validate-state <file.a2ml>  Validate an a2ml STATE descriptile"
+  putStrLn "  ddraig validate-config <ddraig.toml>  Check a site configuration"
+  putStrLn "        (ddraig build reads <src>/ddraig.toml if there is one)"
+  putStrLn "  ddraig explain [code]      Explain a diagnostic code such as DDR0002;"
+  putStrLn "                             with no code, list them all"
   putStrLn "  ddraig --version           Print version"
   putStrLn "  ddraig --help              This help"
   putStrLn ""
+  putStrLn "Problems are reported on stderr as error[DDRnnnn] with the file, line and"
+  putStrLn "column where known. Exit status: 0 success, 1 the build found problems,"
+  putStrLn "2 the command line was wrong."
+  putStrLn ""
   putStrLn "Test subcommands:"
   putStrLn "  ddraig test-markdown | test-frontmatter | test-full | test-state | test-attest"
+  putStrLn "  ddraig test-diagnostics"
 
 main : IO ()
 main = do
@@ -1340,6 +1824,7 @@ main = do
     [_, "test-full"] => testFull
     [_, "test-state"] => testState
     [_, "test-attest"] => testAttest
+    [_, "test-diagnostics"] => testDiagnostics
     [_, "--version"] => putStrLn ("ddraig " ++ ddraigVersion)
     [_, "-v"] => putStrLn ("ddraig " ++ ddraigVersion)
     [_, "--help"] => usage
@@ -1349,4 +1834,8 @@ main = do
     [_, "build", src, out, base] => buildSite src out base
     [_, "clean", out] => cleanOut out
     [_, "validate-state", path] => validateStateFile path
+    [_, "validate-config", path] => validateConfigFile path
+    [_, "explain"] => putStr renderCodeList
+    [_, "explain", code] => explainCode code
+    (_ :: cmd :: rest) => failUsage [badInvocation cmd rest]
     _ => usage

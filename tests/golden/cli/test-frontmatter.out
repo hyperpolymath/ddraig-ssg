@@ -1,0 +1,10 @@
+=== Test: Frontmatter ===
+Title: My Post
+Date: 2024-01-15
+Tags: ["idris", "ssg"]
+Draft: False
+Desc: hi
+Brand: Ddraig
+Body: 
+Content here
+

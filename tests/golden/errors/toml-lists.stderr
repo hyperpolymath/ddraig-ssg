@@ -1,0 +1,10 @@
+error[DDR0101]: this value is not valid TOML
+  --> fixtures/toml-lists/ddraig.toml:14:3
+   |
+14 |   bad-item,
+   |   ^^^^^^^^ not a string, number, true/false or list
+   |
+   = help: if it is text, put it in quotes: "bad-item"
+   = note: in the list that starts on line 12
+
+ddraig: fixtures/toml-lists/ddraig.toml is not a valid site configuration: 1 error

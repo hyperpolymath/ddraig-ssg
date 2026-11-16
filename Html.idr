@@ -8,11 +8,15 @@
 --   * `render` is TOTAL: every value of `Html` maps to a String. There is no
 --     partial path and no "should-not-happen" guard. (O2: well-formedness.)
 --
---   * An `Img` node CANNOT be constructed without a non-empty `Alt`. WCAG
---     1.1.1 "images carry alt text" is therefore an invariant of the AST,
---     enforced by the type-checker, not a lint that runs afterwards.
---     (O3 fragment: alt *presence* is decidable; alt *meaningfulness* stays
---     author-owned -- see ARCHITECTURE.adoc "What provably accessible means".)
+--   * An `Img` node CANNOT be constructed without a non-blank `Alt`. The AST
+--     can still express an image without alt in three ways, each explicit and
+--     each handled by Attest.idr: `UnlabelledImg` (the author omitted it),
+--     `Elem`/`Void` with tag "img", and `Raw` markup. The first two make a page
+--     fail certification; `Raw` is outside the checked content and is reported
+--     as unchecked. So "every image on a certified page carries alt text"
+--     holds for the typed content, enforced by the type-checker plus a total
+--     decision. (O3 fragment: alt *presence* is decidable; alt *meaningfulness*
+--     stays author-owned -- see ARCHITECTURE.adoc "What provably accessible means".)
 --
 -- Text content is escaped on render; raw passthrough is an explicit, named
 -- constructor so the one trust boundary in the output is visible in source.
@@ -29,12 +33,14 @@ import Data.String
 -- ============================================================================
 
 ||| Alternative text for an image. `MkAlt` is inhabited only when its argument
-||| is statically non-empty: the erased `So (text /= "")` witness carries the
-||| proof and costs nothing at runtime. `MkAlt ""` does not type-check, because
-||| `So ("" /= "")` = `So False` is uninhabited.
+||| is statically non-blank: the erased `So (trim text /= "")` witness carries
+||| the proof and costs nothing at runtime. `MkAlt ""` and `MkAlt "   "` do not
+||| type-check, because `So (trim "   " /= "")` = `So False` is uninhabited.
+||| (Requiring only `text /= ""` would let whitespace-only alt through, which a
+||| screen reader announces as nothing.)
 public export
 data Alt : Type where
-  MkAlt : (text : String) -> {auto 0 prf : So (text /= "")} -> Alt
+  MkAlt : (text : String) -> {auto 0 prf : So (trim text /= "")} -> Alt
 
 ||| Recover the underlying text (total).
 public export
@@ -49,7 +55,7 @@ public export
 mkAlt : String -> Maybe Alt
 mkAlt raw =
   let t = trim raw in
-  case choose (t /= "") of
+  case choose (trim t /= "") of
     Left  prf => Just (MkAlt t {prf})
     Right _   => Nothing
 
@@ -80,6 +86,11 @@ data Html : Type where
   ||| non-empty alt" invariant stays exact -- decorative is a deliberate,
   ||| visible choice, never an accidental empty `Img`.
   DecorativeImg : (src : String) -> Html
+  ||| An image whose author gave no alt text and did not mark it decorative.
+  ||| It exists so that the omission is represented, not guessed at: it renders
+  ||| with no alt attribute, and Attest's `ImagesLabelled` predicate rejects any
+  ||| page that contains one, so it can never appear on a certified page.
+  UnlabelledImg : (src : String) -> Html
   ||| A void (self-closing) element: tag + attributes, no children. Renders
   ||| `<tag ... />` (e.g. <hr/>). Distinct from `Elem` so void elements never
   ||| get an invalid end tag.
@@ -116,6 +127,8 @@ mutual
     "<img src=\"" ++ escape src ++ "\" alt=\"" ++ escape (altText alt) ++ "\" />"
   render (DecorativeImg src) =
     "<img src=\"" ++ escape src ++ "\" alt=\"\" />"
+  render (UnlabelledImg src) =
+    "<img src=\"" ++ escape src ++ "\" />"
   render (Void tag attrs) =
     "<" ++ escape tag ++ concat (map renderAttr attrs) ++ " />"
   render (Elem tag attrs kids) =

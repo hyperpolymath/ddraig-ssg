@@ -27,8 +27,10 @@ show up as a golden-test diff.
 
 * One Atom 1.0 feed at `/feed.xml`.
 * *Entries:* every built (non-draft) page, in the order the source tree was
-  walked. That order comes from the directory listing and is *not sorted*, so it
-  can differ between filesystems.
+  walked. Since the golden-test baseline, each directory's entries are sorted
+  (by code point) before the walk, so the order no longer depends on the
+  filesystem. Before that it followed the directory listing and could differ
+  between machines. It is still path order, not date order.
 * *Feed title and author name:* the first non-empty `brand`/`site` front matter
   value found, otherwise `Ddraig Site`.
 * *Feed id:* the absolute URL of `/feed.xml` when a base URL is given, otherwise
@@ -64,7 +66,7 @@ Known defects in the current feed, to be fixed only with a golden diff:
   feed.
 . The "latest date" is a string comparison, which is wrong once dates carry
   different UTC offsets.
-. Entry order is unspecified (see above).
+. Entries are in path order, not newest first (see above).
 . An undated entry takes the feed's `<updated>`. It therefore looks like the
   newest entry, and it changes whenever another page's date changes.
 . `<summary>` is emitted even when empty, which says "this entry has an empty

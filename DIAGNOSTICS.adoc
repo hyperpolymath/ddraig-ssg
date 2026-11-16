@@ -1,0 +1,190 @@
+// SPDX-License-Identifier: CC-BY-SA-4.0
+// SPDX-FileCopyrightText: 2026 Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
+= Ddraig diagnostics
+:toc: macro
+
+When something is wrong, ddraig should say *what* is wrong, *where*, and *how
+to fix it*, in one consistent format, and never just crash. This document
+describes that format, the codes, the exit statuses, and how to add a new
+diagnostic. The implementation is `Diagnostic.idr`.
+
+toc::[]
+
+== What a message looks like
+
+A problem in a file names the file, line and column, quotes the line, and
+underlines the exact text:
+
+[source]
+----
+error[DDR0105]: unknown key "titel" in [site]
+ --> ddraig.toml:3:1
+  |
+3 | titel = "My site"
+  | ^^^^^ not a [site] key
+  |
+  = help: did you mean "title"?
+  = help: values of your own, for templates, go under [extra]
+----
+
+A problem with no file, such as a mistake on the command line, has the same
+first line and help lines:
+
+[source]
+----
+error[DDR0003]: unknown command "biuld"
+  = help: did you mean "build"?
+  = help: run `ddraig --help` to list the commands
+----
+
+(Both are real output; `tests/golden/errors/` holds many more.)
+
+The parts, in order:
+
+. `error` or `warning`, the *code* in brackets, and one line saying what is
+  wrong. Errors stop the build; warnings do not.
+. `-->` and the location: `file`, or `file:line:column`. Lines and columns
+  count from 1; columns count characters.
+. The source line, with carets under the problem and a short label. A tab is
+  shown as one space so the carets line up. If the file cannot be read, the
+  location is still given but no line is quoted.
+. `= help:` lines saying how to fix it, where that is known. When a name is
+  close to a valid one, the first help line is "did you mean ...?".
+. `= note:` lines with further context.
+
+Several problems are all reported in one run, not one per run, in a stable
+order: those without a file first, then by file, line and column. A build that
+stops ends with a count, for example `ddraig: build stopped: 2 errors`.
+
+Problems go to *stderr*. Progress (`Ddraig build: ...`, `+ page.html`) goes to
+*stdout*, so `ddraig build ... > build.log` still shows problems on screen.
+
+== Exit status
+
+[cols="1,4",options="header"]
+|===
+| Status | Meaning
+| 0 | Success. There may still have been warnings.
+| 1 | The build, or a check, found problems; they are on stderr.
+| 2 | The command line was wrong: an unknown command or the wrong number of
+      arguments.
+|===
+
+== Codes
+
+Every message has a code, `DDR` and four digits. Run `ddraig explain DDR0002`
+(in either case) for a longer explanation with an example of the fix, or
+`ddraig explain` for the full list. A code is never reused or renumbered,
+so it is safe to search for.
+
+Codes are grouped by area, one hundred per area:
+
+[cols="1,3",options="header"]
+|===
+| Range | Area
+| DDR00xx | Command line and environment
+| DDR01xx | Site configuration (work package 1, milestone 1)
+| DDR02xx | Templates (milestone 2)
+| DDR03xx | Content model: sections, taxonomies, pagination (milestone 3)
+| DDR04xx | Markdown and shortcodes (milestone 4)
+| DDR06xx | Aliases and redirects (milestone 6)
+| DDR07xx | Internationalisation (milestone 7)
+| DDR08xx | Accessibility certification
+|===
+
+The codes that exist today:
+
+[cols="1,3",options="header"]
+|===
+| Code | Meaning
+| DDR0001 | `SOURCE_DATE_EPOCH` is not a whole number of seconds
+| DDR0002 | The source directory does not exist, or is not a directory
+| DDR0003 | The first argument is not a ddraig command
+| DDR0004 | A command was given the wrong number of arguments
+| DDR0005 | `ddraig explain` was given something that is not a diagnostic code
+| DDR0101 | A line of a TOML file is not valid TOML
+| DDR0102 | A TOML feature that ddraig does not read
+| DDR0103 | A key or a table is defined twice
+| DDR0104 | `ddraig.toml` has a table ddraig does not know
+| DDR0105 | A table in `ddraig.toml` has a key ddraig does not know
+| DDR0106 | A setting in `ddraig.toml` has the wrong kind of value
+| DDR0107 | A setting in `ddraig.toml` has a value ddraig cannot use
+| DDR0108 | A menu entry is missing its name or its url
+| DDR0109 | A configuration file could not be read
+| DDR0201 | A template uses a `{{site...}}` or `{{data...}}` variable that does not exist
+| DDR0202 | A template variable holds a list, which cannot be shown as text
+| DDR0801 | An image has no alt text and is not marked decorative (`{.decorative}`)
+|===
+
+`ddraig explain` is the authoritative list; this table is a copy.
+
+== What is guaranteed, and how
+
+`Diagnostic.idr` is `%default total`, and CI type-checks it on every push, so
+the following hold by construction, not by testing:
+
+* *Every code has an explanation.* `codeId` and `explanation` are total
+  functions over the `Code` type. Adding a code without an explanation, or
+  without an identifier, does not compile.
+* *Reporting cannot crash.* Rendering is total, so turning a problem into a
+  message can never fail or loop.
+
+These are *tested*, not proven:
+
+* The exact text of every message: `tests/golden/errors/` holds the stdout,
+  stderr and exit status of each deliberately broken invocation, and
+  `tests/golden/cli/test-diagnostics.out` pins the rendering of every layout
+  (no location, whole file, quoted line, two-digit line numbers, tabs, carets
+  past the end of a line, empty lines, unreadable files).
+* That identifiers are unique and that `allCodes` lists each one (checked by
+  `ddraig test-diagnostics`).
+* The "did you mean" suggestions for a set of typos.
+
+== "Did you mean ...?"
+
+A suggestion is offered when a name is close to a valid one: the same name in
+a different case, or otherwise the nearest valid name by edit distance
+(insertions, deletions and substitutions), allowing about one edit per three
+characters and at least one. Ties go to the earliest name in ddraig's own
+list, so the suggestion is the same on every run. When nothing is close, no
+suggestion is made rather than a misleading one.
+
+== Adding a diagnostic
+
+. Add a constructor to `Code` in `Diagnostic.idr`, in the right range.
+. Give it an identifier in `codeId` and an explanation in `explanation`. The
+  compiler will not let you skip either.
+. Add it to `allCodes`. `ddraig test-diagnostics` fails if an identifier is
+  duplicated.
+. Report it with `diagError` or `diagWarning`, a location (`atPos` or
+  `inFile`), and `withHelp` saying how to fix it. Use `didYouMean` when the
+  problem is an unknown name.
+. Add a deliberately broken case to `tests/golden.sh` and run
+  `sh tests/golden.sh --update`, so the exact message is reviewed and pinned.
+. Add the code to the table above.
+
+== Debugging a site (for site authors)
+
+Today's tools:
+
+* Read the first error first. Later errors are sometimes caused by it.
+* `ddraig explain <code>` explains any code in a message.
+* The build log on stdout shows each page as it is built (`+ index.md ->
+  index.html`) and whether it passed accessibility certification.
+* Accessibility certification failures are still reported in the older format,
+  on stdout, naming the page but not the line. Moving them to this format
+  (DDR08xx) needs the Markdown parser to record heading line numbers, which is
+  planned.
+
+* `ddraig validate-config ddraig.toml` checks a configuration without
+  building. Errors in `ddraig.toml`, `data/*.toml` and in templates'
+  `{{site...}}` and `{{data...}}` variables point at the file, line and column.
+* When a base URL is in use, the build log says whether it came from the
+  command line or from `ddraig.toml`.
+
+Planned with the template work (work package 1):
+
+* Errors for every unknown template variable and in front matter, located the
+  same way.
+* A way to see where each value a page uses came from: front matter, site
+  configuration, or a default.

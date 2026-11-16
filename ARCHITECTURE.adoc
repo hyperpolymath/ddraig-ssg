@@ -72,6 +72,8 @@ be stated, scoped, and discharged on its own.
 | *O1* | *a2ml schema validity* — a *total* validator decides whether a
   descriptile conforms to the schema. _First realization landed:_ `State.idr`
   (`validateState`, `total`) for the TOML-like 6a2 STATE descriptile format.
+  The site configuration follows the same pattern: `Config.idr`
+  (`validateConfig`, `total`) over the tables `Toml.idr` reads.
 | Decidable; achievable now.
 
 | *O2* | *Output well-formedness* — a typed HTML AST in which malformed markup
@@ -144,6 +146,23 @@ Do not let "provably accessible" stand unqualified. An unqualified claim is
 refuted by a single 3.1.5 counterexample; the scoped claim is not refutable at
 all, because it concedes precisely the criteria that are undecidable.
 ====
+
+What the certificate covers today (`Attest.idr`): the *typed content tree*
+of each page, for exactly one `<h1>`, non-skipping headings, and alt text on
+every image. Three limits are stated rather than hidden:
+
+* *Raw HTML* (Markdown passthrough) is opaque text. It is not inspected, and
+  the attestation file records how many raw blocks each page has, so a reader
+  can see what the certificate does not speak for.
+* *An image without alt* is never guessed at. It is a located build error
+  (`DDR0801`) unless the author marks it `{.decorative}`, which gives an
+  explicit `alt=""`.
+* *Template-owned criteria* (page `lang`, the `<main>` landmark, contrast, the
+  template's own headings) are not on the content tree; they wait for the
+  typed template (work package 1, milestone 2).
+
+The status of every obligation is in the
+link:EXPLAINME.adoc#proof-ledger[proof ledger].
 
 [#echo]
 == The echo-type, precisely

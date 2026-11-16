@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: MPL-2.0
+# Fixture for tests/golden.sh: a complete, valid site configuration.
+
+[site]
+title = "Config Fixture"
+base_url = "https://config.example/docs"
+language = "cy"
+description = "Site-wide description"
+author = "Site Author"
+
+[[menus.main]]
+name = "Home"
+url = "/"
+
+[[menus.main]]
+name = "About"
+url = "/about.html"
+
+[[menus.main]]
+name = "Source & issues"
+url = "https://example.org/source"
+
+[extra]
+github = "https://github.com/example"
+year = 2026
+draft_banner = false

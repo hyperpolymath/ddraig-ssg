@@ -18,14 +18,20 @@ toc::[]
 
 * *Recursive multi-page build* — mirrors a source tree of `.md`/`.markdown`
   into an output tree of `.html`.
+* *Site configuration* — an optional `ddraig.toml` (title, base URL,
+  language, description, author, menus, `[extra]` values) and `data/*.toml`
+  files for templates. Front matter overrides site values. Checked by a
+  *total* decision before anything is written; every mistake is reported with
+  its line and column. See link:CONFIGURATION.adoc[CONFIGURATION.adoc].
 * *Front-matter* — `title`, `date`, `description`, `slug`, `site`/`brand`,
-  `tags`, `layout`/`template`, `draft` (drafts are skipped). Tolerates a
+  `tags`, `layout`/`template`, `lang`, `author`, `draft` (drafts are skipped). Tolerates a
   leading SPDX HTML comment before the `---` fence.
 * *Rich Markdown* — headings with anchor IDs, bold/italic/strikethrough,
   inline code, links, images, blockquotes, ordered + unordered + nested lists,
   pipe tables (with `<th scope="col">`), fenced code blocks with a language
   class, horizontal rules, and *raw-HTML passthrough* for hero/card/badge
-  markup.
+  markup. Every image needs alt text; a purely decorative one is marked
+  `![](divider.png){.decorative}`.
 * *Templating* — file-based layouts (`templates/<layout>.html`), partials
   (`{{> name}}` from `templates/partials/`), a `{{toc}}` table of contents,
   a `{{root}}` path prefix for root-relative links (see `base-url` below),
@@ -42,12 +48,15 @@ toc::[]
   See link:ACCESSIBILITY-CHECKLIST.adoc[ACCESSIBILITY-CHECKLIST.adoc] for the
   engine-owned vs author-owned success criteria.
 * *Proof-carrying accessibility (O3)* — every page is run through a *total*
-  decision (`Attest.idr`) for the machine-decidable content-tree criteria
-  (exactly one `<h1>`, non-skipping headings; alt-presence is already a type
-  invariant). The build *fails* if any page is un-attestable, and emits a
+  decision (`Attest.idr`) for the machine-decidable content-tree criteria:
+  exactly one `<h1>`, non-skipping headings, and alt text on every image (an
+  image without alt is a located build error, `DDR0801`, unless marked
+  `{.decorative}`). The build *fails* if any page is un-attestable, and emits a
   per-page certificate at `/.well-known/accessibility-attestation.json`. A
-  certified page carries an *echo witness* that its output is the render of an
-  accessible source — see link:ARCHITECTURE.adoc[ARCHITECTURE.adoc] (O3).
+  certified page carries an *echo witness* that its output is the render of a
+  source satisfying those criteria. Raw HTML blocks are passed through but not
+  inspected; the certificate counts them for each page — see
+  link:ARCHITECTURE.adoc[ARCHITECTURE.adoc] (O3).
 
 == Architecture
 
@@ -59,15 +68,26 @@ the three proof obligations, and — importantly — the precise scope of what
 link:ARCHITECTURE.adoc[ARCHITECTURE.adoc].
 
 The first piece of that proof surface is `Html.idr`: a typed, correct-by-
-construction HTML core whose `render` is *total* and in which an image node
-cannot be constructed without non-empty alt text (WCAG 1.1.1 presence becomes
-an invariant of the AST). It is type-checked in CI on every push.
+construction HTML core whose `render` is *total* and in which an informative
+image node cannot be constructed without non-blank alt text (WCAG 1.1.1
+presence becomes an invariant of the AST; the explicit forms of an image
+without alt fail certification). It is type-checked in CI on every push.
+
+Every proof obligation, its status and what it does not cover is listed in
+the link:EXPLAINME.adoc#proof-ledger[proof ledger]; open proof debt is in
+link:docs/proof-debt.adoc[docs/proof-debt.adoc].
+
+[cols="1,3"]
+|===
+| Proofs | link:EXPLAINME.adoc#proof-ledger[7 proven of 11; 2 tested-only, 1 argued, 1 open]
+|===
 
 The engine's Markdown rendering now flows through this core — both inline
 content and *block structure* (headings, paragraphs, lists, blockquotes,
 tables, fenced code, thematic breaks) are parsed into typed `Html` nodes and
-emitted by the total `render`. So every image carries alt text and every block
-is well-formed by construction (matching open/close tags, valid nesting). Only
+emitted by the total `render`. So every image carries alt text, is explicitly
+decorative, or stops the build, and every block is well-formed by
+construction (matching open/close tags, valid nesting). Only
 the document template/layout is still string-based.
 
 == Build
@@ -87,9 +107,18 @@ Requires `idris2 >= 0.8.0`.
 ddraig build <src-dir> <out-dir> [base-url]   # build a site
 ddraig clean <out-dir>                         # remove an output dir
 ddraig validate-state <file.a2ml>              # validate an a2ml STATE descriptile
+ddraig validate-config <ddraig.toml>           # check a site configuration
+ddraig explain [code]                          # explain a diagnostic code, or list them
 ddraig --version
 ddraig --help
 ----
+
+When something is wrong, ddraig reports it on stderr with a code, the file,
+line and column where known, and how to fix it, for example
+`error[DDR0003]: unknown command "biuld"` followed by
+`= help: did you mean "build"?`. `ddraig explain DDR0003` explains any code.
+Exit status is 0 on success, 1 when the build finds problems, and 2 when the
+command line is wrong. See link:DIAGNOSTICS.adoc[DIAGNOSTICS.adoc].
 
 `validate-state` runs the *total* `validateState` decision (`State.idr`) over a
 TOML-like a2ml STATE descriptile, reporting every schema violation (missing
@@ -123,6 +152,8 @@ A site directory may contain:
 [source]
 ----
 src/
+  ddraig.toml           # optional site configuration (CONFIGURATION.adoc)
+  data/team.toml        # optional data for templates: {{data.team.<key>}}
   index.md              # pages (front-matter + Markdown)
   blog/post.md          # nested pages mirror into the output tree
   templates/
@@ -133,6 +164,29 @@ src/
     CNAME
     .well-known/security.txt
 ----
+
+== Tests
+
+[source,bash]
+----
+./build/exec/ddraig test-state       # also -markdown, -frontmatter, -full, -attest, -diagnostics
+sh tests/golden.sh                   # compare output with tests/golden/
+sh tests/golden.sh --update          # after an intended output change; review the diff
+----
+
+`tests/golden.sh` compares, byte for byte, the output of each `test-*`
+subcommand, the site built from `examples/`, and what a user sees for each
+deliberately broken command (stdout, stderr and exit status) with the expected
+output in `tests/golden/`. A change to `ddraig`'s output or to any of its
+messages therefore shows up as a diff of those files, committed with the
+change that caused it.
+
+The tests pin the build date with `SOURCE_DATE_EPOCH`
+(https://reproducible-builds.org/specs/source-date-epoch/[spec]). When that
+variable is set to a number of seconds since 1970-01-01 UTC, `ddraig build`
+uses it instead of the clock for the attestation's `generated` date and the
+feed's fallback `<updated>`, so the same sources always give the same output.
+Any other non-empty value stops the build with an error.
 
 == Licence
 

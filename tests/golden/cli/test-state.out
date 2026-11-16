@@ -1,0 +1,13 @@
+=== Test: STATE validator ===
+violations: 10
+  - [metadata] missing key: version
+  - [metadata] missing key: last-updated
+  - [metadata] missing key: status
+  - [metadata] missing key: session
+  - missing section [project-context]
+  - missing section [route-to-mvp]
+  - missing section [blockers-and-issues]
+  - missing section [critical-next-actions]
+  - missing section [maintenance-status]
+  - [position] phase = "bogus" not in {design, implementation, testing, maintenance, archived, pre-release}
+OK: invalid descriptile rejected

@@ -1,0 +1,36 @@
+error[DDR0201]: unknown template variable {{site.titel}}
+ --> fixtures/template-vars/templates/default.html:4:36
+  |
+4 | <head><meta charset="UTF-8"><title>{{site.titel}}</title></head>
+  |                                    ^^^^^^^^^^^^^^ no such variable
+  |
+  = help: did you mean "site.title"?
+  = help: site variables come from ddraig.toml, data variables from data/<file>.toml
+
+error[DDR0201]: unknown template variable {{data.team.lede}}
+ --> fixtures/template-vars/templates/default.html:8:9
+  |
+8 | <footer>{{data.team.lede}} | {{ site.extra.tags }} | {{site.extra.github}}</footer>
+  |         ^^^^^^^^^^^^^^^^^^ no such variable
+  |
+  = help: did you mean "data.team.lead"?
+  = help: site variables come from ddraig.toml, data variables from data/<file>.toml
+
+error[DDR0202]: {{site.extra.tags}} is a list, which a template cannot show as text
+ --> fixtures/template-vars/templates/default.html:8:30
+  |
+8 | <footer>{{data.team.lede}} | {{ site.extra.tags }} | {{site.extra.github}}</footer>
+  |                              ^^^^^^^^^^^^^^^^^^^^^ this is a list
+  |
+  = help: show one item at a time, or use a string instead of a list
+
+error[DDR0201]: unknown template variable {{site.extra.githb}}
+ --> fixtures/template-vars/templates/partials/nav.html:2:36
+  |
+2 | <nav aria-label="Primary"><a href="{{site.extra.githb}}">Source</a></nav>
+  |                                    ^^^^^^^^^^^^^^^^^^^^ no such variable
+  |
+  = help: did you mean "site.extra.github"?
+  = help: site variables come from ddraig.toml, data variables from data/<file>.toml
+
+ddraig: build stopped: 4 errors

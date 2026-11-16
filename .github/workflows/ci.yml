@@ -32,6 +32,10 @@ jobs:
         run: idris2 --check State.idr
       - name: Type-check accessibility attestation (proof O3 - echo types)
         run: idris2 --check Attest.idr
+      - name: Type-check diagnostics (total; every code has an explanation)
+        run: idris2 --check Diagnostic.idr
+      - name: Type-check site configuration (validateConfig total)
+        run: idris2 --check Config.idr
       - name: Test Markdown
         run: ./build/exec/ddraig test-markdown
       - name: Test Frontmatter
@@ -42,8 +46,33 @@ jobs:
         run: ./build/exec/ddraig test-state
       - name: Test a11y attestation (certifies accessible, rejects inaccessible)
         run: ./build/exec/ddraig test-attest
+      - name: Test diagnostics (unique codes, suggestions)
+        run: ./build/exec/ddraig test-diagnostics
       - name: Validate this repo's STATE descriptile (a2ml O1)
         run: ./build/exec/ddraig validate-state .machine_readable/descriptiles/STATE.a2ml
+      - name: Golden tests (output byte-identical to tests/golden/)
+        # Any change to ddraig's output must arrive with its diff to
+        # tests/golden/; regenerate with `sh tests/golden.sh --update`.
+        run: sh tests/golden.sh
+  trusted-base:
+    # Estate Trusted-Base Reduction Policy: every soundness-relevant escape
+    # hatch (believe_me, assert_total, partial, ...) must be annotated and
+    # listed in docs/proof-debt.adoc. Runs only standards' checker, at a pinned
+    # commit, rather than the whole governance-reusable.yml.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          path: caller
+      - name: Checkout the estate standards (checker script)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          repository: metadatastician/standards
+          ref: 9bdf864cc7f2c8e24b4df84bf00d04158eee3ad5
+          path: standards
+      - name: Check escape hatches against docs/proof-debt.adoc
+        run: bash standards/scripts/check-trusted-base.sh caller
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -1,0 +1,101 @@
+error[DDR0105]: key "titel" is not inside a table
+ --> fixtures/config-broken/ddraig.toml:3:1
+  |
+3 | titel = "Outside any table"
+  | ^^^^^ outside any table
+  |
+  = help: did you mean "title" under [site]?
+  = help: put it under a table: site settings go under [site], your own values under [extra]
+
+error[DDR0104]: unknown table [sitee]
+ --> fixtures/config-broken/ddraig.toml:5:1
+  |
+5 | [sitee]
+  | ^^^^^^^ not a ddraig table
+  |
+  = help: did you mean "site"?
+  = help: the tables are [site], [extra] and [[menus.<name>]]
+
+error[DDR0105]: unknown key "titel" in [site]
+ --> fixtures/config-broken/ddraig.toml:9:1
+  |
+9 | titel = "Typo in a key"
+  | ^^^^^ not a [site] key
+  |
+  = help: did you mean "title"?
+  = help: values of your own, for templates, go under [extra]
+
+error[DDR0106]: "language" in [site] must be a string
+  --> fixtures/config-broken/ddraig.toml:10:12
+   |
+10 | language = 42
+   |            ^^ this is a number
+   |
+   = help: write it in quotes: language = "..."
+
+error[DDR0107]: base_url must be an absolute http:// or https:// address
+  --> fixtures/config-broken/ddraig.toml:11:12
+   |
+11 | base_url = "hyperpolymath.github.io/ddraig-ssg"
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not an absolute http(s) address
+   |
+   = help: start it with https:// (or http://), e.g. "https://example.org"
+
+error[DDR0101]: unclosed string
+  --> fixtures/config-broken/ddraig.toml:12:15
+   |
+12 | description = "Never closed
+   |               ^ this string is never closed
+   |
+   = help: close it on the same line; ddraig does not read multi-line strings
+
+error[DDR0103]: key "author" is set twice in this table
+  --> fixtures/config-broken/ddraig.toml:14:1
+   |
+14 | author = "Second"
+   | ^^^^^^
+   |
+   = help: delete one of the two
+   = note: first set on line 13
+
+error[DDR0108]: menu entry in [[menus.main]] has no url
+  --> fixtures/config-broken/ddraig.toml:16:1
+   |
+16 | [[menus.main]]
+   | ^^^^^^^^^^^^^^ this entry has no url
+   |
+   = help: add url = "..." to this entry
+
+error[DDR0104]: [menus.footer] must be written [[menus.footer]]
+  --> fixtures/config-broken/ddraig.toml:19:1
+   |
+19 | [menus.footer]
+   | ^^^^^^^^^^^^^^ a menu needs double brackets
+   |
+   = help: write [[menus.footer]], once for each entry in the menu
+
+error[DDR0102]: floating-point numbers are not supported
+  --> fixtures/config-broken/ddraig.toml:24:9
+   |
+24 | ratio = 1.5
+   |         ^^^
+   |
+   = help: write it as a string, "1.5", or as a whole number
+
+error[DDR0102]: dates and times are not supported
+  --> fixtures/config-broken/ddraig.toml:25:12
+   |
+25 | launched = 2026-06-22
+   |            ^^^^^^^^^^
+   |
+   = help: write it as a string: "2026-06-22"
+
+error[DDR0101]: unclosed list
+  --> fixtures/config-broken/ddraig.toml:26:8
+   |
+26 | tags = ["a",
+   |        ^ this list is never closed
+   |
+   = help: close it with ]
+
+ddraig: fixtures/config-broken/ddraig.toml is not a valid site configuration: 12 errors
