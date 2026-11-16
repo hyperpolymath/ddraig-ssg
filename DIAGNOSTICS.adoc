@@ -89,7 +89,7 @@ Codes are grouped by area, one hundred per area:
 | DDR04xx | Markdown and shortcodes (milestone 4)
 | DDR06xx | Aliases and redirects (milestone 6)
 | DDR07xx | Internationalisation (milestone 7)
-| DDR08xx | Accessibility certification (reserved)
+| DDR08xx | Accessibility certification
 |===
 
 The codes that exist today:
@@ -113,6 +113,7 @@ The codes that exist today:
 | DDR0109 | A configuration file could not be read
 | DDR0201 | A template uses a `{{site...}}` or `{{data...}}` variable that does not exist
 | DDR0202 | A template variable holds a list, which cannot be shown as text
+| DDR0801 | An image has no alt text and is not marked decorative (`{.decorative}`)
 |===
 
 `ddraig explain` is the authoritative list; this table is a copy.

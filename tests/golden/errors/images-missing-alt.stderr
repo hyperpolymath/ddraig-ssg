@@ -1,0 +1,23 @@
+error[DDR0801]: image "chart.png" has no alt text
+  --> fixtures/images/index.md:10:40
+   |
+10 | An image whose alt text was forgotten: ![](chart.png)
+   |                                        ^^^^^^^^^^^^^^ no alt text
+   |
+   = help: describe the image inside the brackets, or add {.decorative} straight after it if it is purely decorative
+
+error[DDR0801]: image "a.png" has no alt text
+  --> fixtures/images/index.md:16:18
+   |
+16 | Two on one line: ![ ](a.png) and ![](b.png)
+   |                  ^^^^^^^^^^^ no alt text
+   |
+   = help: describe the image inside the brackets, or add {.decorative} straight after it if it is purely decorative
+
+error[DDR0801]: image "b.png" has no alt text
+  --> fixtures/images/index.md:16:34
+   |
+16 | Two on one line: ![ ](a.png) and ![](b.png)
+   |                                  ^^^^^^^^^^ no alt text
+   |
+   = help: describe the image inside the brackets, or add {.decorative} straight after it if it is purely decorative

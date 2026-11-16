@@ -14,3 +14,4 @@ DDR0108  a menu entry is missing its name or its url
 DDR0109  a configuration file could not be read
 DDR0201  a template uses a {{site...}} or {{data...}} variable that does not exist
 DDR0202  a template variable holds a list, which cannot be shown as text
+DDR0801  an image has no alt text and is not marked decorative

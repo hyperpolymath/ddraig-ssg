@@ -201,8 +201,10 @@ parseFrontmatter content =
 -- rendered from there. This is the build pipeline's trust boundary in
 -- miniature: `inlineNodes` is the untrusted (covering) parser; `Html.render`
 -- is the total renderer. Every image therefore flows through `Html.mkAlt`, so
--- informative images provably carry non-empty alt text, and empty/whitespace
--- alt becomes an explicit `DecorativeImg` (alt="") rather than a silent alt="".
+-- informative images provably carry non-blank alt text. An image with no alt
+-- is decorative (alt="") only when the author says so with `{.decorative}`
+-- straight after it; otherwise it is an `UnlabelledImg`, which fails
+-- certification and is reported as DDR0801. ddraig never guesses.
 -- All inline HTML assembly now lives in the typed core, not string concat.
 -- ============================================================================
 
@@ -234,11 +236,20 @@ inlineNodes text = go (unpack text) []
                 Just (url, rest) => Just (pack txt, pack url, rest)
             _ => Nothing
     -- the trust boundary: untrusted alt text enters via the total `mkAlt`.
-    imageNode : (alt : String) -> (url : String) -> Html
-    imageNode alt url =
+    imageNode : (alt : String) -> (url : String) -> (decorative : Bool) -> Html
+    imageNode alt url decorative =
       case mkAlt alt of
-        Just a  => Img url a            -- informative: proof-carrying non-empty alt
-        Nothing => DecorativeImg url    -- empty/whitespace alt: explicit alt=""
+        Just a  => Img url a            -- informative: proof-carrying non-blank alt
+        Nothing => if decorative
+                      then DecorativeImg url  -- marked {.decorative}: explicit alt=""
+                      else UnlabelledImg url  -- no alt, no marker: an error, not a guess
+    -- `{.decorative}` straight after an image marks it decorative.
+    decorativeMark : List Char
+    decorativeMark = unpack "{.decorative}"
+    takeMark : List Char -> (Bool, List Char)
+    takeMark cs = if isPrefixOf decorativeMark cs
+                     then (True, drop (length decorativeMark) cs)
+                     else (False, cs)
     -- flush the buffered plain-text run (reversed) as one Text node.
     flush : List Char -> List Html -> List Html
     flush []  rest = rest
@@ -248,7 +259,9 @@ inlineNodes text = go (unpack text) []
     -- image: ![alt](url)
     go ('!' :: '[' :: rest) buf =
       case readLink rest of
-        Just (alt, url, after) => flush buf (imageNode alt url :: go after [])
+        Just (alt, url, after) =>
+          let (dec, after') = takeMark after in
+          flush buf (imageNode alt url dec :: go after' [])
         Nothing => go ('[' :: rest) ('!' :: buf)
     -- link: [text](url)  (link text is itself parsed for inline markup)
     go ('[' :: rest) buf =
@@ -997,9 +1010,62 @@ pick page site dflt =
     Just s  => if s /= "" then s else dflt
     Nothing => dflt
 
--- Build one markdown file. Returns the Page plus its O3 certification status
--- (certified?, violations). Nothing only when the file is a draft or unreadable.
-buildOne : HasIO io => BuildCtx -> (rel : String) -> io (Maybe (Page, Bool, List String))
+-- One built page: its O3 certification status (certified?, violations), how
+-- many raw HTML blocks it has (not inspected by the certifier, so the
+-- attestation lists them), and located DDR0801 errors for images without alt.
+record PageResult where
+  constructor MkPageResult
+  page       : Page
+  certified  : Bool
+  violations : List String
+  rawBlocks  : Nat
+  imageDiags : List Diagnostic
+
+-- DDR0801 for each image without alt text, in document order. The parser has
+-- already decided which images lack alt (so an image inside code is never
+-- reported); this only finds where to point, by searching the page source
+-- for each image's `](src)` in turn. One that cannot be found is reported
+-- against the file without a position.
+missingAltDiags : (file : String) -> (content : String) -> List String -> List Diagnostic
+missingAltDiags file content srcs =
+  case lines content of
+    []        => map (\s => inFile file (diag s)) srcs
+    (l :: ls) => go 1 0 (unpack l) ls srcs
+  where
+    diag : String -> Diagnostic
+    diag src = withHelp "describe the image inside the brackets, or add {.decorative} straight after it if it is purely decorative" $
+               diagError ImageMissingAlt ("image \"" ++ src ++ "\" has no alt text")
+    findFrom : List Char -> List Char -> Nat -> Maybe Nat
+    findFrom needle hay i =
+      if isPrefixOf needle hay then Just i
+      else case hay of
+             []          => Nothing
+             (_ :: rest) => findFrom needle rest (S i)
+    -- index of the last "![" in a line prefix (0 if none)
+    lastBang : List Char -> Nat
+    lastBang cs = goB 0 cs 0
+      where
+        goB : Nat -> List Char -> Nat -> Nat
+        goB _ [] best = best
+        goB i ('!' :: '[' :: rest) _ = goB (S i) ('[' :: rest) i
+        goB i (_ :: rest) best = goB (S i) rest best
+    -- n: line number (1-based); off: column offset of `cs` within the line
+    go : Nat -> Nat -> List Char -> List String -> List String -> List Diagnostic
+    go _ _ _ _ [] = []
+    go n off cs ls (s :: ss) =
+      let needle = unpack ("](" ++ s ++ ")") in
+      case findFrom needle cs 0 of
+        Just i =>
+          let bang = lastBang (take i cs)
+              endI = i + length needle in
+          atPos file n (S (off + bang)) (endI `minus` bang) "no alt text" (diag s)
+            :: go n (off + endI) (drop endI cs) ls ss
+        Nothing => case ls of
+          []          => map (\x => inFile file (diag x)) (s :: ss)
+          (l :: rest) => go (S n) 0 (unpack l) rest (s :: ss)
+
+-- Build one markdown file. Nothing only when the file is a draft or unreadable.
+buildOne : HasIO io => BuildCtx -> (rel : String) -> io (Maybe PageResult)
 buildOne ctx rel = do
   let src = ctx.ctxSrc
   let out = ctx.ctxOut
@@ -1042,7 +1108,9 @@ buildOne ctx rel = do
                putStrLn ("  + " ++ rel ++ " -> " ++ relHtml
                           ++ (if certified then "  [a11y ok]" else "  [a11y FAIL]"))
                traverse_ (\v => putStrLn ("    a11y: " ++ v)) viols
-               pure (Just (MkPage ("/" ++ relHtml) fm2, certified, viols))
+               pure (Just (MkPageResult (MkPage ("/" ++ relHtml) fm2) certified viols
+                             (countRawF md.blocks)
+                             (missingAltDiags inPath content (unlabelledF md.blocks))))
 
 -- Copy known asset dirs (assets/static/css/js/images) preserving name.
 copyAssets : HasIO io => (src : String) -> (out : String) -> io ()
@@ -1234,16 +1302,17 @@ jsonEsc s = concat (map e (unpack s))
 
 -- Emit the O3 attestation certificate: one record per page stating whether it
 -- satisfies the decidable accessibility predicates, and any violations. A page
--- marked `certified: true` is so because `certify` produced the proof.
+-- marked `certified: true` is so because `certify` produced the proof. Raw
+-- HTML blocks are not inspected, so each page also states how many it has.
 writeAttestation : HasIO io => (base : String) -> (out : String) -> (now : String)
-                -> List (Page, Bool, List String) -> io ()
+                -> List PageResult -> io ()
 writeAttestation base out now results = do
   let entries = concat (intersperse ",\n" (map entryJson results))
   let json = "{\n"
           ++ "  \"generator\": \"Ddraig SSG " ++ ddraigVersion ++ "\",\n"
           ++ "  \"generated\": \"" ++ now ++ "T00:00:00Z\",\n"
-          ++ "  \"scope\": \"decidable WCAG subset (content tree)\",\n"
-          ++ "  \"predicates\": [\"one-h1\", \"heading-no-skip\", \"alt-present-by-construction\"],\n"
+          ++ "  \"scope\": \"decidable WCAG subset (typed content tree; raw HTML blocks are not inspected)\",\n"
+          ++ "  \"predicates\": [" ++ concat (intersperse ", " (map (\p => "\"" ++ p ++ "\"") certifiedPredicates)) ++ "],\n"
           ++ "  \"pages\": [\n" ++ entries ++ "\n  ]\n"
           ++ "}\n"
   let dst = joinPath out ".well-known/accessibility-attestation.json"
@@ -1251,12 +1320,13 @@ writeAttestation base out now results = do
   ignore (writeFile dst json)
   putStrLn "  + .well-known/accessibility-attestation.json"
   where
-    entryJson : (Page, Bool, List String) -> String
-    entryJson (p, certified, viols) =
-      "    {\"page\": \"" ++ jsonEsc (absUrl base p.url)
-        ++ "\", \"certified\": " ++ (if certified then "true" else "false")
+    entryJson : PageResult -> String
+    entryJson r =
+      "    {\"page\": \"" ++ jsonEsc (absUrl base r.page.url)
+        ++ "\", \"certified\": " ++ (if r.certified then "true" else "false")
+        ++ ", \"unchecked_raw_html_blocks\": " ++ show r.rawBlocks
         ++ ", \"violations\": ["
-        ++ concat (intersperse ", " (map (\v => "\"" ++ jsonEsc v ++ "\"") viols))
+        ++ concat (intersperse ", " (map (\v => "\"" ++ jsonEsc v ++ "\"") r.violations))
         ++ "]}"
 
 -- ----------------------------------------------------------------------------
@@ -1404,7 +1474,7 @@ buildSite src out cliBase = do
        let mdFiles = filter (\p => isMarkdown p && not (underSpecial p)) all
        putStrLn ("Found " ++ show (length mdFiles) ++ " markdown file(s).")
        results <- buildEach ctx mdFiles
-       let pages = map (\(p, _, _) => p) results
+       let pages = map (.page) results
        copyAssets src out
        writeDefaultStyle src out
        copyPublic src out
@@ -1412,19 +1482,22 @@ buildSite src out cliBase = do
        genFeed base out now cfg.siteTitle pages
        writeAttestation base out now results
        putStrLn ("Done. " ++ show (length pages) ++ " page(s) built.")
-       let failed = filter (\(_, c, _) => not c) results
+       -- images without alt: located errors (each page is also uncertified)
+       let imgDiags = concatMap (.imageDiags) results
+       when (not (null imgDiags)) $ report imgDiags
+       let failed = filter (\r => not r.certified) results
        when (not (null failed)) $ do
          putStrLn ("ACCESSIBILITY: " ++ show (length failed) ++ " page(s) failed certification:")
-         traverse_ (\(p, _, vs) => do
-                      putStrLn ("  " ++ p.url)
-                      traverse_ (\v => putStrLn ("    - " ++ v)) vs) failed
+         traverse_ (\r => do
+                      putStrLn ("  " ++ r.page.url)
+                      traverse_ (\v => putStrLn ("    - " ++ v)) r.violations) failed
          exitFailure
   where
     underSpecial : String -> Bool
     underSpecial p =
       any (\d => strHasPrefix (d ++ "/") p)
           ["templates","public","assets","static","css","js","images","data"]
-    buildEach : BuildCtx -> List String -> io (List (Page, Bool, List String))
+    buildEach : BuildCtx -> List String -> io (List PageResult)
     buildEach _ [] = pure []
     buildEach ctx (f :: fs) = do
       mp <- buildOne ctx f
@@ -1537,6 +1610,22 @@ testAttest = do
     Left vs => do putStrLn ("OK: inaccessible document rejected (" ++ show (length vs) ++ " violation(s))")
                   traverse_ (\v => putStrLn ("  - " ++ v)) vs
     Right _ => do putStrLn "FAIL: inaccessible document certified"; exitFailure
+  -- alt text: whitespace-only is rejected at the trust boundary
+  case mkAlt "   " of
+    Nothing => putStrLn "OK: whitespace-only alt text rejected"
+    Just _  => do putStrLn "FAIL: whitespace-only alt text accepted"; exitFailure
+  -- images: described and {.decorative} certify; no alt without the marker does not
+  let labelled = parseMarkdownFull "# One\n\n![A red dragon](d.png) and ![](rule.png){.decorative}\n"
+  let unlabelled = parseMarkdownFull "# One\n\n![](d.png)\n"
+  case certify labelled.blocks of
+    Right _  => putStrLn "OK: described and decorative images certified"
+    Left  vs => do putStrLn "FAIL: described/decorative images not certified"
+                   traverse_ (\v => putStrLn ("  - " ++ v)) vs
+                   exitFailure
+  case certify unlabelled.blocks of
+    Left vs => do putStrLn "OK: image without alt rejected"
+                  traverse_ (\v => putStrLn ("  - " ++ v)) vs
+    Right _ => do putStrLn "FAIL: image without alt certified"; exitFailure
 
 -- Rendering samples and invariants for the diagnostics core. The rendered
 -- text is pinned by tests/golden/cli/test-diagnostics.out; the invariants

@@ -1,5 +1,5 @@
 === Test: diagnostics ===
-codes: 16, unique: True, round-trip: True
+codes: 17, unique: True, round-trip: True
 closest "titel": Just "title"
 closest "Title": Just "title"
 closest "biuld": Just "build"

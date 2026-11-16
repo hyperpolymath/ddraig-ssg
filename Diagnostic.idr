@@ -64,6 +64,7 @@ data Code
   | ConfigUnreadable
   | TemplateUnknownVariable
   | TemplateNotText
+  | ImageMissingAlt
 
 ||| Every code, in identifier order. Keep in step with `Code`: the
 ||| test-diagnostics subcommand checks that identifiers are unique and that
@@ -74,7 +75,7 @@ allCodes =
   [ BadSourceDateEpoch, SourceDirMissing, UnknownCommand, WrongArguments, UnknownCode
   , TomlSyntax, TomlUnsupported, TomlDuplicate, ConfigUnknownTable, ConfigUnknownKey
   , ConfigWrongType, ConfigBadValue, ConfigMenuEntry, ConfigUnreadable
-  , TemplateUnknownVariable, TemplateNotText ]
+  , TemplateUnknownVariable, TemplateNotText, ImageMissingAlt ]
 
 ||| The stable identifier printed in messages and accepted by `ddraig explain`.
 ||| Never reuse or renumber one: people search for them.
@@ -96,6 +97,7 @@ codeId ConfigMenuEntry         = "DDR0108"
 codeId ConfigUnreadable        = "DDR0109"
 codeId TemplateUnknownVariable = "DDR0201"
 codeId TemplateNotText         = "DDR0202"
+codeId ImageMissingAlt         = "DDR0801"
 
 ||| Look a code up by its identifier (exact match).
 export
@@ -236,6 +238,22 @@ explanation TemplateNotText = MkExplanation
   [ "Templates can show strings, numbers and true/false. A list, such as"
   , "tags = [\"a\", \"b\"], needs a loop, which arrives with the template engine"
   , "(work package 1, milestone 2). Until then, use a string."
+  ]
+explanation ImageMissingAlt = MkExplanation
+  "an image has no alt text and is not marked decorative"
+  [ "Screen readers announce an image by its alt text, so every image that"
+  , "carries information needs one: describe what it shows, in place of"
+  , "the empty brackets."
+  , ""
+  , "    ![A red dragon breathing fire](dragon.png)"
+  , ""
+  , "An image that is purely decorative (a divider, a background flourish)"
+  , "should be skipped by screen readers instead. Say so explicitly:"
+  , ""
+  , "    ![](divider.png){.decorative}"
+  , ""
+  , "ddraig does not guess: an empty alt without the marker stops the build,"
+  , "and the page is not certified in the accessibility attestation."
   ]
 
 -- ============================================================================

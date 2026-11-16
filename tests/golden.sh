@@ -106,6 +106,7 @@ run_case validate-config-nickel  "$D" validate-config fixtures/config-nickel/ddr
 run_case toml-lists              "$D" validate-config fixtures/toml-lists/ddraig.toml
 run_case template-vars          "$D" build fixtures/template-vars out
 run_case data-broken            "$D" build fixtures/data-broken out
+run_case images-missing-alt     "$D" build fixtures/images out
 
 # --- Update, or compare ------------------------------------------------------------
 if $update; then
